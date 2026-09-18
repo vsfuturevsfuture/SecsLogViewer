@@ -129,5 +129,42 @@ console.log('\n[4] 导出');
 const csv = api.buildRows(api.state.pairs[0], api.state.ecid);
 check('buildRows 可直接用于导出', csv.length === 6 && csv[0].id === '26555' && csv[0].name === 'SDC8_GPPosHom', csv[0]);
 
+/* ---------- 5) 消息含义 ---------- */
+console.log('\n[5] 消息含义');
+api.state.tab = 'detail';
+api.state.pairIndex = 0;
+api.render();
+check('明细页顶部说明了这一对的含义', /设备常数/.test(el('pairMeaning').innerHTML) && /读取|返回/.test(el('pairMeaning').innerHTML), el('pairMeaning').innerHTML);
+check('含义里带了官方英文名', /Equipment Constant Request/.test(el('pairMeaning').innerHTML));
+check('配对设置卡片里有实时含义提示', /S2F13/.test(el('codeHint').innerHTML) && /设备常数/.test(el('codeHint').innerHTML), el('codeHint').innerHTML);
+check('内置消息表条数显示在左侧', /使用内置消息表（\d+ 条）/.test(el('dictStatus').textContent), el('dictStatus').textContent);
+
+api.state.tab = 'dict';
+api.render();
+const dictHtml = el('view').innerHTML;
+check('消息含义页列出日志里出现的消息', dictHtml.includes('S2F13') && dictHtml.includes('S1F1') && dictHtml.includes('S2F14'));
+check('消息含义页给出中文说明与官方名称', dictHtml.includes('读取设备常数') && dictHtml.includes('Equipment Constant Request'));
+check('消息含义页标出日志里出现次数', /日志里出现/.test(dictHtml) && /<td class="num">3<\/td>/.test(dictHtml), /<td class="num">\d+<\/td>/.exec(dictHtml));
+check('消息含义页有 Stream 说明（S1/S2…）', dictHtml.includes('各 Stream') && /S16/.test(dictHtml) && dictHtml.includes('工艺作业管理'));
+check('消息含义页给出日志中观察到的方向', dictHtml.includes('H-&gt;E') || dictHtml.includes('H->E'));
+el('filter').value = 'S16F21';
+api.render();
+check('没出现在日志里的消息也能查到（S16F21）',
+  el('view').innerHTML.includes('S16F21') && el('view').innerHTML.includes('Process Job Get Space') && el('view').innerHTML.includes('还有多少空间'),
+  el('view').innerHTML.length);
+el('filter').value = '报警';
+api.render();
+check('按中文搜索“报警”能筛出 S5F1', el('view').innerHTML.includes('S5F1') && el('view').innerHTML.includes('Alarm Report Send'), el('view').innerHTML.length);
+el('filter').value = '';
+
+// 自定义消息表覆盖内置说明
+await new Promise((r) => { api.loadSecsDictFile(new File(['S2F13,Equipment Constant Request,我们厂自己的说法,H->E,仅报头'], 'my.csv')); setTimeout(r, 40); });
+api.state.tab = 'detail'; api.state.pairIndex = 0; api.render();
+check('导入自定义消息表后覆盖内置说明', /我们厂自己的说法/.test(el('pairMeaning').innerHTML) && /自定义/.test(el('pairMeaning').innerHTML), el('pairMeaning').innerHTML);
+check('自定义表的条数显示在左侧', /已导入/.test(el('dictStatus').innerHTML), el('dictStatus').innerHTML);
+api.state.tab = 'dict'; api.render();
+check('消息含义页也显示自定义来源', /自定义/.test(el('view').innerHTML));
+api.state.tab = 'detail'; api.render();
+
 console.log('\n' + (failures ? '有 ' + failures + ' 项失败' : '全部通过 ✔'));
 process.exit(failures ? 1 : 0);

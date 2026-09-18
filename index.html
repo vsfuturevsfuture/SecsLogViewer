@@ -73,6 +73,13 @@
   .meta{font-size:12px;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--line2);background:#fbfcfe;
         display:flex;gap:14px;flex-wrap:wrap}
   .meta b{color:#0f172a;font-weight:600}
+  .meaning{padding:7px 12px;border-bottom:1px solid var(--line2);background:#f8fbff;font-size:12.5px;
+        color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .meaning b{color:#1d4ed8}
+  .meaning .st{color:var(--muted)}
+  .tag{display:inline-block;font-size:11px;padding:0 5px;border-radius:4px;background:#eef2f7;color:#475569;margin-left:4px}
+  .tag.user{background:#dcfce7;color:#15803d}
+  .tag.miss{background:var(--warn-soft);color:var(--warn)}
   .tableWrap{overflow:auto;max-height:calc(100vh - 268px)}
   table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
   th,td{padding:4px 10px;border-bottom:1px solid var(--line2);text-align:left;white-space:nowrap;
@@ -139,7 +146,19 @@
     </section>
 
     <section class="card">
-      <h3><span class="step">3</span>配对设置</h3>
+      <h3><span class="step">3</span>SECS 消息表（含义说明）</h3>
+      <div class="hint">内置常见 SECS/GEM 消息的中文含义，也可以在“消息含义”页导出模板、改完再导入覆盖。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="pickDict">导入消息表…</button>
+        <button id="exportDict">导出模板 (CSV)</button>
+      </div>
+      <input type="file" id="dictInput" accept=".csv,.txt,.cfg" hidden>
+      <div class="status" id="dictStatus" style="margin-top:8px">使用内置消息表</div>
+    </section>
+
+    <section class="card">
+      <h3><span class="step">4</span>配对设置</h3>
+      <div class="status" id="codeHint" style="margin-bottom:8px">S2F13 设备常数请求 → S2F14 设备常数数据</div>
       <div class="row">
         <span class="hint">请求</span><select id="reqCode"></select>
         <span class="hint">→ 应答</span><select id="repCode"></select>
@@ -166,7 +185,7 @@
     </section>
 
     <section class="card">
-      <h3><span class="step">4</span>筛选 / 排序</h3>
+      <h3><span class="step">5</span>筛选 / 排序</h3>
       <input type="search" id="filter" placeholder="ECID 或名称关键字，多个可用逗号分隔，如 26555,GPPosHom" style="width:100%">
       <div class="row" style="margin-top:8px">
         <select id="sortBy">
@@ -201,6 +220,7 @@
       <button class="on" data-tab="detail">明细（键 =&gt; 值）</button>
       <button data-tab="pivot">横向对比（多对并列）</button>
       <button data-tab="raw">原文</button>
+      <button data-tab="dict">消息含义（SxFy 是干啥的）</button>
     </div>
     <div class="toolbar">
       <span class="hint">配对：</span>
@@ -213,6 +233,7 @@
       <button id="csvBtn" disabled>导出 CSV</button>
       <button id="jsonBtn" disabled>导出 JSON</button>
     </div>
+    <div class="meaning" id="pairMeaning"></div>
     <div class="meta" id="meta"><span class="hint">导入日志后点击“开始解析”。</span></div>
     <div id="view"></div>
   </main>
@@ -475,12 +496,17 @@ function createCollector(opts) {
 // 轻量检测：统计日志里所有“相邻且 messageID 相同”的消息对
 function createPairDetector() {
   var counts = new Map(), prev = null, total = 0;
+  var codeStats = new Map();     // code -> { count, dirs: Map(方向 -> 次数) }
   return {
-    counts: counts,
+    counts: counts, codeStats: codeStats,
     feed: function (line) {
       var h = parseHeader(line);
       if (!h) return;
       total++;
+      var cs = codeStats.get(h.code);
+      if (!cs) { cs = { count: 0, dirs: new Map() }; codeStats.set(h.code, cs); }
+      cs.count++;
+      cs.dirs.set(h.dir, (cs.dirs.get(h.dir) || 0) + 1);
       if (prev && prev.msgId === h.msgId && prev.code !== h.code) {
         var key = prev.code + '->' + h.code;
         counts.set(key, (counts.get(key) || 0) + 1);
@@ -499,6 +525,213 @@ function isReplyConvention(reqCode, repCode) {
   return a[1] === b[1] && (parseInt(b[2], 10) === parseInt(a[2], 10) + 1);
 }
 
+/* ---------- SECS 消息含义表（按 SEMI E5 / E30 / E37 / E39 / E40 常见叫法整理） ----------
+   说明：S 编号是“流(Stream)”，代表一类功能；SxFy 才是具体消息。
+   表里没有的，界面会退回显示“流(Stream)的含义 + 未收录提示”，也可以自己导入消息表覆盖。 */
+var SECS_STREAMS = {
+  S1:  { en: 'Equipment Status / Communications', zh: '设备状态与通信：心跳、在线/离线切换、查询状态变量(SV)' },
+  S2:  { en: 'Equipment Control and Diagnostics', zh: '设备控制与诊断：读写设备常数(ECID)、校时、事件报告定义、远程命令、Trace 采集' },
+  S3:  { en: 'Material Status', zh: '材料状态：载具(Carrier)/晶圆的状态与信息' },
+  S4:  { en: 'Material Control', zh: '材料控制：对载具/晶圆的搬运、转移等控制动作' },
+  S5:  { en: 'Exception Handling (Alarms)', zh: '异常处理：报警上报、报警使能、报警清单' },
+  S6:  { en: 'Data Collection', zh: '数据采集与事件报告：事件(CEID)上报、报告(RPTID)内容、Trace 采样数据' },
+  S7:  { en: 'Recipe Management (Process Program)', zh: '配方管理：配方上下发、验证、删除、查询配方目录' },
+  S8:  { en: 'Control Program Transfer', zh: '控制程序传输：程序/文件类数据的传输' },
+  S9:  { en: 'System Errors', zh: '系统错误：协议层错误通知（报文不认识、超时、数据非法等）' },
+  S10: { en: 'Terminal Services', zh: '终端服务：主机与设备之间的人工可读文本消息' },
+  S12: { en: 'Wafer Mapping', zh: '晶圆映射：载具内晶圆分布图（Map）' },
+  S14: { en: 'Object Services (E39)', zh: '对象服务：按对象模型读写属性/方法、订阅对象事件' },
+  S16: { en: 'Process Job Management (E40)', zh: '工艺作业管理：创建/启动/查询工艺作业(PRJob)及其空间' }
+};
+
+// code: [英文名, 中文说明, 方向, 消息体说明]
+var SECS_MESSAGES = {
+  S1F1: ['Are You There', '主机问一句“你在吗”（心跳、通信握手的起手式）', 'H->E', '仅报头（Header Only）'],
+  S1F2: ['On Line Data', '设备回答“我在”，并带上机型(MDLN)与软件版本(SOFTREV)', 'E->H', 'MDLN + SOFTREV'],
+  S1F3: ['Selected Equipment Status Request', '主机按 SVID 列表查询设备状态变量(SV)', 'H->E', 'SVID 列表'],
+  S1F4: ['Selected Equipment Status Data', '设备按同样顺序返回状态变量的值', 'E->H', '与 S1F3 一一对应的值列表'],
+  S1F11: ['Status Variable Namelist Request', '主机请求设备上报“所有状态变量(SV)的清单”', 'H->E', ''],
+  S1F12: ['Status Variable Namelist Reply', '设备返回状态变量清单（SVID/名称/单位）', 'E->H', ''],
+  S1F13: ['Establish Communications Request', '主机请求建立通信（上线握手）', 'H->E', ''],
+  S1F14: ['Establish Communications Request Acknowledge', '设备同意建立通信，并回送机型/软件版本', 'E->H', 'COMMACK + MDLN + SOFTREV'],
+  S1F15: ['Request OFF-LINE', '主机要求设备转为离线(Off-Line)', 'H->E', '仅报头'],
+  S1F16: ['OFF-LINE Acknowledge', '设备确认已离线(OFLACK)', 'E->H', 'OFLACK'],
+  S1F17: ['Request ON-LINE', '主机要求设备转为在线(On-Line)', 'H->E', '仅报头'],
+  S1F18: ['ON-LINE Acknowledge', '设备确认已在线(ONLACK)', 'E->H', 'ONLACK'],
+
+  S2F13: ['Equipment Constant Request', '主机按 ECID 列表读取设备常数（Equipment Constant）', 'H->E', 'ECID 列表（U4）'],
+  S2F14: ['Equipment Constant Data', '设备返回设备常数值，顺序与 S2F13 一一对应', 'E->H', '与 S2F13 一一对应的值'],
+  S2F15: ['New Equipment Constant Send', '主机给设备写设备常数（设置 ECID 的值）', 'H->E', 'ECID + 新值'],
+  S2F16: ['New Equipment Constant Acknowledge', '设备确认常数写入结果', 'E->H', 'EAC'],
+  S2F17: ['Date and Time Request', '主机读取设备的日期时间', 'H->E', '仅报头'],
+  S2F18: ['Date and Time Data', '设备返回日期时间', 'E->H', '时间字符串'],
+  S2F23: ['Trace Initialize Send', '主机下发数据采集(Trace)任务：采哪些 SV、周期、采样点数', 'H->E', 'TRID + 采样参数'],
+  S2F24: ['Trace Initialize Acknowledge', '设备确认 Trace 任务建立结果', 'E->H', 'TIAACK'],
+  S2F25: ['Loopback Diagnostic Request', '通信回环自检（测链路是否正常）', 'H->E', '任意数据'],
+  S2F26: ['Loopback Diagnostic Data', '设备原样回送数据', 'E->H', '与请求相同的数据'],
+  S2F29: ['Equipment Constant Namelist Request', '主机请求设备上报全部 ECID 的清单（编号/名称/单位/范围）', 'H->E', ''],
+  S2F30: ['Equipment Constant Namelist', '设备返回 ECID 清单', 'E->H', 'ECID 定义列表'],
+  S2F31: ['Date and Time Set Request', '主机给设备校时（设置日期时间）', 'H->E', '时间字符串'],
+  S2F32: ['Date and Time Set Acknowledge', '设备确认校时结果', 'E->H', 'TIACK'],
+  S2F33: ['Define Report', '定义事件报告的内容：报告(RPTID)里放哪些变量', 'H->E', 'DATAID + 报告定义'],
+  S2F34: ['Define Report Acknowledge', '设备确认报告已定义', 'E->H', 'DRACK'],
+  S2F35: ['Link Event Report', '把事件(CEID)与报告(RPTID)绑定', 'H->E', '事件与报告的对应关系'],
+  S2F36: ['Link Event Report Acknowledge', '设备确认绑定结果', 'E->H', 'LRACK'],
+  S2F37: ['Enable/Disable Event Report', '打开或关闭一个/多个事件报告', 'H->E', 'CEED + CEID 列表'],
+  S2F38: ['Enable/Disable Event Report Acknowledge', '设备确认事件报告开关结果', 'E->H', 'ERACK'],
+  S2F41: ['Host Command Send', '主机下发远程命令（START / STOP / PP-SELECT / CANCEL 等）', 'H->E', 'RCMD + 参数'],
+  S2F42: ['Host Command Acknowledge', '设备回命令执行结果', 'E->H', 'HCACK + 参数'],
+  S2F43: ['Reset Spooling Streams and Functions', '复位设备的 spooling（断连期间缓存）设置', 'H->E', ''],
+  S2F44: ['Reset Spooling Acknowledge', '设备确认 spooling 设置已复位', 'E->H', ''],
+  S2F45: ['Define Variable Limit Attributes', '定义变量限值属性（上下限、触发方式）', 'H->E', '名称/字段随 E5 版本略有差异'],
+  S2F46: ['Variable Limit Attributes Acknowledge', '设备对变量限值定义的应答', 'E->H', '名称/字段随 E5 版本略有差异'],
+  S2F47: ['Variable Limit Attribute Request', '主机查询变量限值属性', 'H->E', '名称/字段随 E5 版本略有差异'],
+  S2F48: ['Variable Limit Attribute Data', '设备返回变量限值属性', 'E->H', '名称/字段随 E5 版本略有差异'],
+  S2F49: ['Enhanced Host Command Send', '增强版远程命令（多命令、多参数、带确认）', 'H->E', ''],
+  S2F50: ['Enhanced Host Command Acknowledge', '设备回增强命令的结果', 'E->H', ''],
+
+  S3F17: ['Carrier Action Request', '载具(Carrier)相关请求：S3 是材料状态流，常见于载具 ID/状态的读取与动作', 'H->E', '各厂家实现略有差异'],
+  S3F18: ['Carrier Action Acknowledge', '载具相关请求的应答', 'E->H', '各厂家实现略有差异'],
+
+  S5F1: ['Alarm Report Send', '设备上报报警：报警码(ALCD) + 报警文本(ALTX)', 'E->H', 'ALCD + ALID + ALTX'],
+  S5F2: ['Alarm Report Acknowledge', '主机确认收到报警', 'H->E', 'ACKC5'],
+  S5F3: ['Enable/Disable Alarm Send', '主机使能或禁止某个报警上报', 'H->E', 'ALED + ALID'],
+  S5F4: ['Enable/Disable Alarm Acknowledge', '设备确认报警使能结果', 'E->H', 'ACKC5'],
+  S5F5: ['List Alarms Request', '主机请求设备的报警清单', 'H->E', ''],
+  S5F6: ['List Alarms Data', '设备返回报警清单', 'E->H', 'ALID 列表'],
+  S5F7: ['List Enabled Alarms Request', '主机请求“当前已使能的报警”清单', 'H->E', ''],
+  S5F8: ['List Enabled Alarms Data', '设备返回已使能报警清单', 'E->H', 'ALID 列表'],
+
+  S6F1: ['Trace Data Send', '按 S2F23 建立的采集任务上报采样数据', 'E->H', 'TRID + 采样点'],
+  S6F2: ['Trace Data Acknowledge', '主机确认收到采样数据', 'H->E', 'ACKC6'],
+  S6F5: ['Multi-block Data Send Inquire', '大数据分段传输前的询问', 'E->H', '分段传输相关'],
+  S6F6: ['Multi-block Data Send Grant', '主机同意设备发送多块数据', 'H->E', '分段传输相关'],
+  S6F11: ['Event Report Send', '设备上报事件：事件号(CEID) + 报告数据（GEM 里最核心的上报）', 'E->H', 'DATAID + CEID + 报告内容'],
+  S6F12: ['Event Report Acknowledge', '主机确认收到事件报告', 'H->E', 'ACKC6'],
+  S6F13: ['Annotated Event Report Send', '带注释的事件报告上报', 'E->H', '事件 + 注释信息'],
+  S6F14: ['Annotated Event Report Acknowledge', '主机确认收到带注释的事件报告', 'H->E', ''],
+  S6F15: ['Event Report Request', '主机主动索取某个事件的最新报告数据', 'H->E', 'CEID'],
+  S6F16: ['Event Report Data', '设备返回该事件的数据', 'E->H', '报告内容'],
+  S6F19: ['Individual Report Request', '主机请求某个报告(RPTID)的内容', 'H->E', 'RPTID'],
+  S6F20: ['Individual Report Data', '设备返回报告内容', 'E->H', '报告内容'],
+
+  S7F1: ['Process Program Load Inquire', '主机先问设备“能不能接收配方”（协商超时时间）', 'H->E', 'PPID + 长度'],
+  S7F2: ['Process Program Load Grant', '设备回答可以/不可以接收', 'E->H', 'PPGNT'],
+  S7F3: ['Process Program Send', '主机把配方内容下发给设备', 'H->E', 'PPID + 配方正文'],
+  S7F4: ['Process Program Send Acknowledge', '设备确认配方已收到', 'E->H', 'ACKC7'],
+  S7F5: ['Process Program Request', '主机向设备索取配方', 'H->E', 'PPID'],
+  S7F6: ['Process Program Data', '设备把配方内容发给主机', 'E->H', 'PPID + 配方正文'],
+  S7F17: ['Delete Process Program Send', '主机要求删除配方', 'H->E', 'PPID 列表'],
+  S7F18: ['Delete Process Program Acknowledge', '设备确认删除结果', 'E->H', 'ACKC7'],
+  S7F19: ['Current Process Program Directory Request', '主机请求设备上“当前有哪些配方”（配方目录）', 'H->E', '仅报头'],
+  S7F20: ['Current Process Program Directory', '设备返回配方目录清单', 'E->H', 'PPID 列表'],
+
+  S9F1:  ['Unrecognized Device ID', '收到的报文不是发给自己的（DEVICEID 不匹配）', '双向', 'MHEAD'],
+  S9F3:  ['Unrecognized Stream Type', '收到的 Stream 不认识', '双向', 'MHEAD'],
+  S9F5:  ['Unrecognized Function Type', '收到的 Function 不认识', '双向', 'MHEAD'],
+  S9F7:  ['Illegal Data', '报文体数据不合法（长度/格式不对）', '双向', 'MHEAD'],
+  S9F9:  ['Transaction Timer Timeout', '等应答超时（T3 超时）', '双向', 'SHEAD'],
+  S9F11: ['Data Too Long', '数据太长，超过允许长度', '双向', 'MHEAD'],
+  S9F13: ['Conversation Timeout', '会话超时', '双向', 'MEXP'],
+
+  S10F1: ['Terminal Request', '设备要求往主机终端打印一条消息', 'E->H', 'TID + 文本'],
+  S10F2: ['Terminal Request Acknowledge', '主机确认收到终端消息', 'H->E', 'ACKC10'],
+  S10F3: ['Terminal Display, Single', '主机往设备终端显示一条消息', 'H->E', 'TID + 文本'],
+  S10F4: ['Terminal Display, Single Acknowledge', '设备确认已显示', 'E->H', 'ACKC10'],
+  S10F5: ['Terminal Display, Multi-block', '主机往设备终端显示多块消息', 'H->E', 'TID + 多块文本'],
+  S10F6: ['Terminal Display, Multi-block Acknowledge', '设备确认已显示', 'E->H', 'ACKC10'],
+
+  S14F1: ['GetAttr Request', '读取对象属性（按对象模型 OBJID + 属性号）', 'H->E', 'OBJID + ATTRID 列表'],
+  S14F2: ['GetAttr Data', '返回对象属性值', 'E->H', '属性值列表'],
+  S14F3: ['SetAttr Request', '设置对象属性', 'H->E', 'OBJID + 属性 + 值'],
+  S14F4: ['SetAttr Acknowledge', '确认属性设置结果', 'E->H', ''],
+
+  S16F1:  ['Process Job Create', '主机要求创建一个工艺作业(PRJob)：用哪个配方、处理哪些材料', 'H->E', '名称/字段随 E40 版本略有差异'],
+  S16F2:  ['Process Job Create Acknowledge', '设备回创建结果（含 PRJobID）', 'E->H', '名称/字段随 E40 版本略有差异'],
+  S16F5:  ['Process Job Command', '主机对工艺作业下命令（启动/停止/暂停/中止）', 'H->E', '名称/字段随 E40 版本略有差异'],
+  S16F6:  ['Process Job Command Acknowledge', '设备回命令执行结果', 'E->H', '名称/字段随 E40 版本略有差异'],
+  S16F21: ['Process Job Get Space', '主机查询设备“还有多少空间可以创建新的工艺作业(PRJob)”', 'H->E', '仅报头（Header Only）'],
+  S16F22: ['Process Job Get Space Acknowledge', '设备返回剩余可创建的作业数量', 'E->H', '剩余空间/数量']
+};
+
+// S16F21 -> S16（不能用 slice(0,2)，那会把 S16 当成 S1）
+function secsStreamKey(code) {
+  var m = /^S(\d+)F\d+$/.exec(String(code == null ? '' : code).toUpperCase().replace(/\s+/g, ''));
+  return m ? 'S' + m[1] : null;
+}
+
+// 查一条消息的含义：优先用用户导入的表，再退回内置表，最后退回“流(Stream)的含义”
+function secsInfo(code, userDict) {
+  var c = String(code == null ? '' : code).toUpperCase().replace(/\s+/g, '');
+  var hit = (userDict && userDict[c]) || SECS_MESSAGES[c] || null;
+  var sk = secsStreamKey(c);
+  var stream = (sk && SECS_STREAMS[sk]) || null;
+  return {
+    code: c,
+    en: hit ? hit[0] || '' : '',
+    zh: hit ? hit[1] || '' : '',
+    dir: hit ? hit[2] || '' : '',
+    body: hit ? hit[3] || '' : '',
+    stream: stream,
+    streamKey: sk,
+    known: !!hit,
+    from: (userDict && userDict[c]) ? 'user' : (hit ? 'builtin' : 'none')
+  };
+}
+
+// 一行 CSV（支持 "双引号包起来的,逗号"）
+function csvSplitLine(line) {
+  var out = [], cur = '', q = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line.charAt(i);
+    if (q) {
+      if (ch === '"') { if (line.charAt(i + 1) === '"') { cur += '"'; i++; } else q = false; }
+      else cur += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  for (var k = 0; k < out.length; k++) out[k] = out[k].trim();
+  return out;
+}
+
+// 解析用户导入的消息表：消息码,英文名,中文说明,方向,消息体说明（后两项可省）
+function parseSecsDict(text) {
+  var map = {}, bad = [], total = 0;
+  var lines = String(text).split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var raw = lines[i];
+    if (!raw.trim() || raw.trim().charAt(0) === '#') continue;
+    var f = raw.indexOf('\t') >= 0 ? raw.split('\t') : csvSplitLine(raw);
+    for (var z = 0; z < f.length; z++) f[z] = String(f[z]).trim();
+    var code = f[0].toUpperCase();
+    if (!/^S\d+F\d+$/.test(code)) { bad.push(raw); continue; }
+    if (!f[1]) { bad.push(raw); continue; }
+    if (f.length >= 3) map[code] = [f[1], f[2], f[3] || '', f[4] || ''];
+    else map[code] = ['', f[1], '', ''];
+    total++;
+  }
+  return { map: map, bad: bad, total: total, size: Object.keys(map).length };
+}
+
+// 导出成可再导入的 CSV（内置表 + 自定义）
+function secsDictCsv(userDict) {
+  var q = function (v) { var s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  var codes = Object.keys(SECS_MESSAGES).concat(Object.keys(userDict || {}).filter(function (c) { return !SECS_MESSAGES[c]; }));
+  codes.sort(function (a, b) {
+    var ma = /^S(\d+)F(\d+)$/.exec(a), mb = /^S(\d+)F(\d+)$/.exec(b);
+    return Number(ma[1]) - Number(mb[1]) || Number(ma[2]) - Number(mb[2]);
+  });
+  var out = ['# SECS 消息表：消息码,英文名,中文说明,方向,消息体说明（后两项可省略）',
+    '# 改完存成 UTF-8 再导入本工具；同一个消息码会覆盖内置表'];
+  codes.forEach(function (c) {
+    var r = secsInfo(c, userDict);
+    out.push([c, r.en, r.zh, r.dir, r.body].map(q).join(','));
+  });
+  return '\ufeff' + out.join('\r\n');
+}
+
 /* ============================= CORE END ============================= */
 
 /* ------------------------------- UI ------------------------------- */
@@ -507,6 +740,8 @@ function isReplyConvention(reqCode, repCode) {
   var state = {
     logFiles: [],
     ecid: null, ecidName: '',
+    secsDict: null, dictName: '',
+    codeStats: new Map(),
     pairs: [], detected: new Map(), warnings: [],
     reqCode: 'S2F13', repCode: 'S2F14',
     tab: 'detail', pairIndex: 0,
@@ -601,6 +836,26 @@ function isReplyConvention(reqCode, repCode) {
       if (state.pairs.length) render();
     });
   }
+  function loadSecsDictFile(file) {
+    file.text().then(function (txt) {
+      var parsed = parseSecsDict(txt);
+      state.secsDict = parsed.map; state.dictName = file.name;
+      var st = $('dictStatus');
+      if (!parsed.size) {
+        st.innerHTML = '<span class="warnRow">' + esc(file.name) + ' 里没有识别到消息（每行形如 S16F21,Process Job Get Space,主机查询还能建几个工艺作业）</span>';
+      } else {
+        st.className = 'status ok';
+        st.innerHTML = '已导入 <b>' + esc(file.name) + '</b>：' + parsed.size + ' 条（同名消息覆盖内置表）' +
+          (parsed.bad.length ? '<br><span class="warnRow">忽略无法解析的行 ' + parsed.bad.length + ' 行</span>' : '');
+      }
+      render();
+    });
+  }
+  function updateCodeHint() {
+    var a = secsInfo($('reqCode').value, state.secsDict), b = secsInfo($('repCode').value, state.secsDict);
+    var one = function (r) { return r.zh ? r.zh : (r.stream ? r.stream.zh : '（消息表里没有这条）'); };
+    $('codeHint').innerHTML = '<b>' + esc(a.code) + '</b> ' + esc(one(a)) + ' → <b>' + esc(b.code) + '</b> ' + esc(one(b));
+  }
 
   /* ---------- 分块读文件（支持 GBK 回退） ---------- */
   function makeDecoder(firstBytes) {
@@ -658,6 +913,7 @@ function isReplyConvention(reqCode, repCode) {
     if (keepRaw && maxPairs > 2000) toast('提示：载入 ' + maxPairs + ' 对还保留原文会比较占内存，建议关掉“保留原文”', 4000);
     var fileBase = 0;                       // 前面文件里已经配到的对数，用来算全局“第 N 对”
     state.totalPairs = 0; state.orphanReplies = 0; state.unmatchedReqs = 0;
+    state.codeStats = new Map();
     state.skipPairs = skipPairs; state.windowFrom = skipPairs + 1;
     try {
       for (var fi = 0; fi < state.logFiles.length; fi++) {
@@ -685,6 +941,12 @@ function isReplyConvention(reqCode, repCode) {
         state.pairs = state.pairs.concat(col.pairs);
         allWarn = allWarn.concat(col.warnings);
         det.counts.forEach(function (v, k) { allDetected.set(k, (allDetected.get(k) || 0) + v); });
+        det.codeStats.forEach(function (v, k) {
+          var cur = state.codeStats.get(k);
+          if (!cur) { cur = { count: 0, dirs: new Map() }; state.codeStats.set(k, cur); }
+          cur.count += v.count;
+          v.dirs.forEach(function (n, d) { cur.dirs.set(d, (cur.dirs.get(d) || 0) + n); });
+        });
         fileBase += col.stat.pairs;
         base += f.size;
         if (state.cancel) break;
@@ -752,7 +1014,10 @@ function isReplyConvention(reqCode, repCode) {
     box.innerHTML = list.slice(0, 40).map(function (e) {
       var parts = e[0].split('->'), on = (parts[0] === state.reqCode && parts[1] === state.repCode);
       var conv = isReplyConvention(parts[0], parts[1]) ? '' : '?';
-      var tip = parts[0] + ' → ' + parts[1] + '（' + e[1] + ' 对）' + (conv ? '，不符合 F+1 约定，仍可解析' : '');
+      var ia = secsInfo(parts[0], state.secsDict), ib = secsInfo(parts[1], state.secsDict);
+      var tip = ia.code + (ia.en ? ' ' + ia.en : '') + ' ' + (ia.zh || '') + '\n   → ' +
+        ib.code + (ib.en ? ' ' + ib.en : '') + ' ' + (ib.zh || '') +
+        '\n日志里出现 ' + e[1] + ' 对' + (conv ? '（不符合 F+1 约定，仍可解析）' : '');
       return '<span class="chip' + (on ? ' on' : '') + '" data-req="' + esc(parts[0]) + '" data-rep="' + esc(parts[1]) +
         '" title="' + esc(tip) + '">' + esc(parts[0] + '→' + parts[1]) + conv + '<small>' + e[1] + '</small></span>';
     }).join('');
@@ -787,11 +1052,14 @@ function isReplyConvention(reqCode, repCode) {
     return rows.filter(function (r) { return (!onlyNamed || r.name) && matchRow(r, ts); });
   }
   function render() {
+    updateCodeHint();
     var has = state.pairs.length > 0;
     $('pairSel').disabled = !has;
-    $('copyBtn').disabled = !has; $('csvBtn').disabled = !has; $('jsonBtn').disabled = !has;
+    $('copyBtn').disabled = !has; $('csvBtn').disabled = !has;
+    $('jsonBtn').disabled = !has || state.tab === 'dict';
     $('jumpTo').disabled = !has; $('jumpBtn').disabled = !has;
     if (!has) {
+      $('pairMeaning').innerHTML = '<span class="st">导入并解析日志后，这里会显示当前这一对消息的含义。</span>';
       $('meta').innerHTML = '<span class="hint">导入日志后点击“开始解析”。</span>';
       $('view').innerHTML = '<div class="empty"><h2>还没有解析结果</h2>' +
         '① 拖入日志文件 → ②（可选）拖入 ECID.cfg → ③ 选择请求/应答码 → ④ 点“开始解析”</div>';
@@ -807,6 +1075,7 @@ function isReplyConvention(reqCode, repCode) {
 
     var p = state.pairs[state.pairIndex];
     var ts = terms();
+    $('pairMeaning').innerHTML = pairMeaningHtml(p);
     var from = state.windowFrom || ((state.pairs[0].globalOrdinal || 0) + 1);
     var to = state.windowTo || ((state.pairs[state.pairs.length - 1].globalOrdinal || 0) + 1);
     var trunc = (state.totalPairs || state.pairs.length) > state.pairs.length
@@ -829,7 +1098,19 @@ function isReplyConvention(reqCode, repCode) {
 
     if (state.tab === 'detail') renderDetail(p, ts);
     else if (state.tab === 'pivot') renderPivot(ts);
-    else renderRaw(p);
+    else if (state.tab === 'raw') renderRaw(p);
+    else renderDict(ts);
+  }
+  function pairMeaningHtml(p) {
+    var a = secsInfo(p.req.code, state.secsDict), b = secsInfo(p.res.code, state.secsDict);
+    var txt = function (r) { return r.zh || (r.stream ? r.stream.zh : '消息表里没有这条，可导入自己的消息表'); };
+    var tag = function (r) {
+      if (r.from === 'user') return '<span class="tag user">自定义</span>';
+      if (!r.known) return '<span class="tag miss">未收录</span>';
+      return '';
+    };
+    return '<b>' + esc(a.code) + '</b> ' + esc(txt(a)) + (a.en ? ' <span class="st">(' + esc(a.en) + ')</span>' : '') + tag(a) +
+      ' &nbsp;→&nbsp; <b>' + esc(b.code) + '</b> ' + esc(txt(b)) + (b.en ? ' <span class="st">(' + esc(b.en) + ')</span>' : '') + tag(b);
   }
   function renderDetail(p, ts) {
     var rows = filterRows(sortRows(currentRows()), ts);
@@ -913,9 +1194,83 @@ function isReplyConvention(reqCode, repCode) {
     if (more) more.onclick = function () { state.renderLimit += 3000; render(); };
   }
   function rawText(p) {
+    if (p.rawKept === false) return { req: '', res: '' };
     var reqTxt = [String(p.req.header)] .concat(p.req.raw || []).join('\n');
     var resTxt = [String(p.res.header)].concat(p.res.raw || []).join('\n');
     return { req: reqTxt, res: resTxt };
+  }
+
+  // 消息含义页：日志里出现过的每个 SxFy + 它属于哪个 Stream + 标准方向/消息体
+  function dictRows(ts) {
+    var rows = [], seen = {};
+    // ① 日志里出现过的：带出现次数和观察到的方向
+    state.codeStats.forEach(function (v, code) {
+      seen[code] = true;
+      var dirs = [];
+      v.dirs.forEach(function (n, d) { dirs.push(d + '×' + n); });
+      rows.push({ code: code, info: secsInfo(code, state.secsDict), count: v.count, dirSeen: dirs.join(' / '), inLog: true });
+    });
+    // ② 消息表里的其它条目（内置 + 自定义），这样没见过的消息也能查
+    var all = {};
+    Object.keys(SECS_MESSAGES).forEach(function (c) { all[c] = 1; });
+    if (state.secsDict) Object.keys(state.secsDict).forEach(function (c) { all[c] = 1; });
+    Object.keys(all).forEach(function (code) {
+      if (!seen[code]) rows.push({ code: code, info: secsInfo(code, state.secsDict), count: null, dirSeen: '', inLog: false });
+    });
+    rows.sort(function (a, b) {
+      if (a.inLog !== b.inLog) return a.inLog ? -1 : 1;          // 日志里出现过的排前面
+      if (a.inLog && b.inLog && a.count !== b.count) return b.count - a.count;
+      var ma = /^S(\d+)F(\d+)$/.exec(a.code), mb = /^S(\d+)F(\d+)$/.exec(b.code);
+      return Number(ma[1]) - Number(mb[1]) || Number(ma[2]) - Number(mb[2]);
+    });
+    if (!ts.length) return rows;
+    return rows.filter(function (r) {
+      var hay = (r.code + ' ' + r.info.en + ' ' + r.info.zh + ' ' + (r.info.stream ? r.info.stream.zh : '')).toLowerCase();
+      for (var i = 0; i < ts.length; i++) if (hay.indexOf(ts[i].toLowerCase()) >= 0) return true;
+      return false;
+    });
+  }
+  function renderDict(ts) {
+    var rows = dictRows(ts);
+    var usedStreams = {};
+    state.codeStats.forEach(function (v, code) { var k = secsStreamKey(code); if (k) usedStreams[k] = true; });
+    var legend = Object.keys(SECS_STREAMS).sort(function (a, b) { return Number(a.slice(1)) - Number(b.slice(1)); }).map(function (s) {
+      var st = SECS_STREAMS[s];
+      var on = usedStreams[s];
+      return '<span class="tag' + (on ? ' user' : '') + '" title="' + esc(st.en) + '">' + esc(s) + '</span> ' + esc(st.zh) + (on ? '（日志里有）' : '');
+    }).join('<br>');
+    var html = ['<div class="meta" style="display:block"><span class="hint">S 开头是<b>流(Stream)</b>，代表一大类功能；具体消息是 <b>SxFy</b>（如 S16F21）。' +
+      '“日志里出现”有数字的是你这份日志里出现过的消息，其余是消息表里的其它常见消息，方便随时查含义。</span></div>',
+      '<div class="tableWrap" style="max-height:none"><table style="width:auto;min-width:100%"><tbody>',
+      '<tr><td style="white-space:normal;max-width:100%"><details' + (state.codeStats.size ? '' : ' open') +
+      '><summary style="cursor:pointer;font-weight:600">各 Stream（S1、S2……）分别管什么</summary>' +
+      '<div class="hint" style="margin-top:6px;line-height:1.9">' + legend + '</div></details></td></tr>',
+      '</tbody></table></div>',
+      '<div class="tableWrap"><table><thead><tr>',
+      '<th>消息</th><th>中文含义（要干啥）</th><th>官方名称</th><th>标准方向</th><th>消息体</th>',
+      '<th class="num">日志里出现</th><th>日志中观察到的方向</th><th>备注</th>',
+      '</tr></thead><tbody>'];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i], info = r.info;
+      var note = '';
+      if (info.from === 'user') note = '<span class="tag user">自定义</span>';
+      else if (!info.known) note = '<span class="tag miss">未收录</span>';
+      html.push('<tr>' +
+        '<td class="id">' + highlight(r.code, ts) + '</td>' +
+        '<td style="white-space:normal;max-width:520px">' + (info.zh ? highlight(info.zh, ts) : '<span class="noname">（消息表里还没有这条，可自己导入补充）</span>') + '</td>' +
+        '<td class="mono">' + (highlight(info.en, ts) || '—') + '</td>' +
+        '<td>' + esc(info.dir || '—') + '</td>' +
+        '<td style="white-space:normal">' + esc(info.body || '—') + '</td>' +
+        '<td class="num">' + (r.count == null ? '—' : r.count) + '</td>' +
+        '<td class="mono">' + esc(r.dirSeen || '—') + '</td>' +
+        '<td>' + note + '</td>' +
+        '</tr>');
+    }
+    html.push('</tbody></table></div>');
+    html.push('<div class="empty" style="padding:12px;text-align:left">' +
+      '表里没有的消息可以自己补：点左侧“导出模板 (CSV)”，按 <code>消息码,英文名,中文说明,方向,消息体说明</code> 改好再“导入消息表”。' +
+      (state.codeStats.size ? '' : '<br>解析过日志后，这张表会按日志里<b>实际出现过</b>的消息来列，并带上出现次数。') + '</div>');
+    $('view').innerHTML = html.join('');
   }
   function renderRaw(p) {
     if (p.rawKept === false) {
@@ -934,6 +1289,17 @@ function isReplyConvention(reqCode, repCode) {
   /* ---------- 导出 ---------- */
   function currentExport() {
     var p = state.pairs[state.pairIndex], ts = terms();
+    if (state.tab === 'dict') {
+      var drows = dictRows(ts);
+      return {
+        head: ['消息', '中文含义', '官方名称', '标准方向', '消息体', '日志里出现次数', '日志中观察到的方向', '来源'],
+        body: drows.map(function (r) {
+          return [r.code, r.info.zh, r.info.en, r.info.dir, r.info.body, r.count == null ? '' : r.count, r.dirSeen,
+            r.info.from === 'user' ? '自定义' : (r.info.known ? '内置' : '未收录')];
+        }),
+        name: 'SECS消息含义表'
+      };
+    }
     if (state.tab === 'raw') {
       var t = rawText(p);
       return { head: ['说明', '内容'], body: [[p.req.code + ' #' + p.msgId, t.req], [p.res.code + ' #' + p.msgId, t.res]], name: exName(p), raw: t.req + '\n' + t.res };
@@ -1023,6 +1389,11 @@ function isReplyConvention(reqCode, repCode) {
   $('pickLog').onclick = function () { $('logInput').click(); };
   $('pickDir').onclick = function () { $('dirInput').click(); };
   $('pickEcid').onclick = function () { $('ecidInput').click(); };
+  $('pickDict').onclick = function () { $('dictInput').click(); };
+  $('exportDict').onclick = function () {
+    download(secsDictCsv(state.secsDict), 'SECS消息表.csv');
+  };
+  $('dictInput').onchange = function (e) { if (e.target.files[0]) loadSecsDictFile(e.target.files[0]); e.target.value = ''; };
   $('logInput').onchange = function (e) { addLogFiles(Array.prototype.slice.call(e.target.files)); e.target.value = ''; };
   $('dirInput').onchange = function (e) { addLogFiles(Array.prototype.slice.call(e.target.files)); e.target.value = ''; };
   $('ecidInput').onchange = function (e) { if (e.target.files[0]) loadEcidFile(e.target.files[0]); e.target.value = ''; };
@@ -1063,6 +1434,8 @@ function isReplyConvention(reqCode, repCode) {
   $('sortBy').onchange = render;
   $('onlyNamed').onchange = render;
   $('onlyChanged').onchange = render;
+  $('reqCode').onchange = updateCodeHint;
+  $('repCode').onchange = updateCodeHint;
   $('copyBtn').onclick = function () {
     var ex = currentExport();
     copyText(state.tab === 'raw' ? ex.raw : toTSV(ex.head, ex.body));
@@ -1084,6 +1457,7 @@ function isReplyConvention(reqCode, repCode) {
   };
 
   updateCodeOptions();
+  $('dictStatus').textContent = '使用内置消息表（' + Object.keys(SECS_MESSAGES).length + ' 条）';
   render();
 
   // 内置示例：不导入任何文件也能先跑通一遍，顺便方便排查工具本身的问题
@@ -1174,7 +1548,10 @@ function isReplyConvention(reqCode, repCode) {
   window.__secsTool = {
     state: state, addLogFiles: addLogFiles, loadEcidFile: loadEcidFile,
     runParse: runParse, render: render, renderDetected: renderDetected,
-    parseEcidCfg: parseEcidCfg, parseBody: parseBody, buildRows: buildRows, buildPivot: buildPivot
+    parseEcidCfg: parseEcidCfg, parseBody: parseBody, buildRows: buildRows, buildPivot: buildPivot,
+    secsInfo: secsInfo, parseSecsDict: parseSecsDict, secsDictCsv: secsDictCsv,
+    dictRows: dictRows, loadSecsDictFile: loadSecsDictFile, jumpToPair: jumpToPair,
+    updateCodeHint: updateCodeHint, pairMeaningHtml: pairMeaningHtml
   };
 })();
 </script>

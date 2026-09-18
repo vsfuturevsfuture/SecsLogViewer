@@ -14,7 +14,8 @@ const core = html.slice(html.lastIndexOf('/*', beginAt), html.lastIndexOf('/*', 
 
 const api = new Function(core + `
   return { parseHeader, parseBody, flattenPairs, parseEcidCfg, lookupEcid, buildRows, buildPivot,
-           createCollector, createPairDetector, isReplyConvention, nodeText };
+           createCollector, createPairDetector, isReplyConvention, nodeText,
+           secsInfo, parseSecsDict, secsDictCsv, csvSplitLine, SECS_MESSAGES, SECS_STREAMS };
 `)();
 
 const LOG = 'C:\\Users\\17140\\Desktop\\sesloftool\\2026917_SW_LOG\\Fa\\Fa\\LogSecslog\\2026-09-17\\2026-09-17.txt';
@@ -198,6 +199,38 @@ col5.finish();
 check('keepRaw=false 时不保留原文', col5.pairs[0].rawKept === false && col5.pairs[0].req.raw.length === 0 && col5.pairs[0].res.raw.length === 0);
 check('keepRaw=false 仍然解析出同样的键值',
   JSON.stringify(api.buildRows(col5.pairs[0], cfgS)) === JSON.stringify(api.buildRows(all.pairs[0], cfgS)));
+
+/* ---------- 9) SECS 消息含义表 ---------- */
+console.log('\n[9] SECS 消息含义表');
+const i21 = api.secsInfo('S16F21');
+check('S16F21 收录了', i21.known && i21.from === 'builtin');
+check('S16F21 = Process Job Get Space', i21.en === 'Process Job Get Space', i21.en);
+check('S16F21 方向 H->E + 仅报头', i21.dir === 'H->E' && /Header Only/.test(i21.body), { dir: i21.dir, body: i21.body });
+check('S16F21 的中文说明提到“还有多少空间/工艺作业”', /空间/.test(i21.zh) && /工艺作业/.test(i21.zh), i21.zh);
+check('S16 这个 Stream 的说明是工艺作业管理', /工艺作业/.test(i21.stream.zh), i21.stream);
+check('S2F13/S2F14 是“设备常数”读写', /设备常数/.test(api.secsInfo('S2F13').zh) && /设备常数/.test(api.secsInfo('S2F14').zh));
+check('S1F1 是心跳、S6F11 是事件上报、S5F1 是报警', /心跳|你在吗/.test(api.secsInfo('S1F1').zh) && /事件/.test(api.secsInfo('S6F11').zh) && /报警/.test(api.secsInfo('S5F1').zh));
+check('S7F19 是配方目录、S14F1 是对象属性、S3F17 走 S3 材料流', /配方目录/.test(api.secsInfo('S7F19').zh) && /对象属性/.test(api.secsInfo('S14F1').zh) && /材料/.test(api.secsInfo('S3F17').stream.zh));
+check('未收录的消息退回 Stream 说明', !api.secsInfo('S2F99').known && /设备控制与诊断/.test(api.secsInfo('S2F99').stream.zh));
+check('Stream 也没有的不会崩', api.secsInfo('S99F1').known === false && api.secsInfo('S99F1').stream === null);
+check('大小写/空格不影响查询', api.secsInfo(' s2f13 ').en === 'Equipment Constant Request');
+const ud = api.parseSecsDict('# 注释行\nS16F21,"Process Job Get Space",我们厂自己的说明,H->E,仅报头\nS2F99,My Message,自定义消息\n');
+check('导入的表能覆盖内置说明', api.secsInfo('S16F21', ud.map).zh === '我们厂自己的说明' && api.secsInfo('S16F21', ud.map).from === 'user');
+check('导入的表能补充新消息', api.secsInfo('S2F99', ud.map).en === 'My Message' && api.secsInfo('S2F99', ud.map).from === 'user');
+check('只有两列（消息码,中文）也能识别', api.parseSecsDict('S9F9,应答超时').map['S9F9'][1] === '应答超时');
+check('引号包起来的字段不会被逗号切开', api.parseSecsDict('S1F1,"Are You There",主机问你在吗,H->E').map['S1F1'][0] === 'Are You There');
+check('不合法/表头的行被忽略', api.parseSecsDict('消息码,英文名,中文说明\n乱七八糟行\nS1F1,Are You There').bad.length === 2);
+const csv = api.secsDictCsv(ud.map);
+check('导出的 CSV 能原样再导入', api.parseSecsDict(csv).map['S2F99'][1] === '自定义消息');
+check('导出的 CSV 含内置 80 条以上', api.parseSecsDict(csv).size > 80, api.parseSecsDict(csv).size);
+
+/* ---------- 10) 日志里出现过的消息都能给出含义 ---------- */
+console.log('\n[10] 用真实日志核对消息表覆盖率');
+const seenCodes = Array.from(col.codeCounts.keys());
+const missing = seenCodes.filter((c) => !api.secsInfo(c).known);
+console.log('        日志里出现的消息码（' + seenCodes.length + ' 种）：' + seenCodes.join(' '));
+check('日志里出现的每种消息都能查到含义（未收录：' + (missing.join(' ') || '无') + '）', missing.length === 0, missing);
+check('S16F21 在日志里出现过 2 次', col.codeCounts.get('S16F21') === 2, col.codeCounts.get('S16F21'));
 
 console.log('\n' + (failures ? '有 ' + failures + ' 项失败' : '全部通过 ✔'));
 process.exit(failures ? 1 : 0);
