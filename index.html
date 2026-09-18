@@ -1,0 +1,1182 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SECS 日志解析工具 · S2F13/S2F14 ECID 键值配对</title>
+<style>
+  :root{
+    --bg:#f5f7fa; --panel:#ffffff; --line:#e3e8ef; --line2:#eef2f7;
+    --text:#1f2937; --muted:#6b7280; --muted2:#94a3b8;
+    --accent:#2563eb; --accent-soft:#e8f0ff; --ok:#0f9d58; --warn:#c2410c; --warn-soft:#fff4e5;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Cascadia Mono","Microsoft YaHei Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 "Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;}
+  code{font-family:var(--mono);background:#f1f5f9;border-radius:4px;padding:0 3px;font-size:12px}
+  header{padding:13px 18px;background:linear-gradient(180deg,#1e293b,#0f172a);color:#e5e7eb;
+         display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  header h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.2px}
+  header .sub{font-size:12px;color:#94a3b8}
+  header code{background:#334155;color:#e2e8f0}
+  .app{display:grid;grid-template-columns:352px 1fr;gap:14px;padding:14px;align-items:start}
+  @media(max-width:1080px){.app{grid-template-columns:1fr}}
+  aside{display:flex;flex-direction:column;gap:12px;min-width:0}
+  main{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+       box-shadow:0 1px 2px rgba(15,23,42,.04);overflow:hidden}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;
+        box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .card h3{margin:0 0 8px;font-size:13px;font-weight:600;color:#0f172a;display:flex;align-items:center;gap:6px}
+  .card h3 .step{display:inline-flex;width:18px;height:18px;border-radius:50%;background:var(--accent-soft);
+        color:var(--accent);font-size:11px;align-items:center;justify-content:center;font-weight:700}
+  .hint{font-size:11.5px;color:var(--muted);word-break:break-all;line-height:1.45}
+  .drop{border:1.5px dashed #c7d2e4;border-radius:8px;padding:10px;text-align:center;color:var(--muted);
+        font-size:12.5px;background:#fbfcfe;transition:.12s}
+  .drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;font-size:12.5px;padding:5px 10px;border-radius:7px;border:1px solid #cbd5e1;
+         background:#fff;color:#334155;cursor:pointer;transition:.12s}
+  button:hover{background:#f1f5f9}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.primary:hover{background:#1d4ed8}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.ghost{border-color:transparent;background:transparent;color:var(--accent);padding:3px 6px}
+  input[type=text],input[type=search],select{font:inherit;font-size:12.5px;padding:5px 8px;border-radius:7px;
+        border:1px solid #cbd5e1;background:#fff;color:#334155;min-width:0}
+  input[type=text]:focus,input[type=search]:focus,select:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
+  label.chk{display:flex;gap:6px;align-items:center;font-size:12.5px;color:#475569;cursor:pointer}
+  ul.files{list-style:none;margin:8px 0 0;padding:0;max-height:150px;overflow:auto;font-size:12px}
+  ul.files li{display:flex;justify-content:space-between;gap:8px;padding:3px 6px;border-radius:6px;
+        font-family:var(--mono);color:#334155}
+  ul.files li:nth-child(odd){background:#f8fafc}
+  ul.files li .sz{color:var(--muted2);white-space:nowrap}
+  .status{font-size:12px;padding:6px 8px;border-radius:7px;background:#f8fafc;border:1px solid var(--line2);color:#475569}
+  .status.ok{background:#f0fdf4;border-color:#bbf7d0;color:#15803d}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;max-height:132px;overflow:auto}
+  .chip{font-size:12px;font-family:var(--mono);border:1px solid #d7e0ec;background:#fff;border-radius:999px;
+        padding:3px 9px;cursor:pointer;color:#334155}
+  .chip:hover{border-color:var(--accent);color:var(--accent)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .chip small{color:var(--muted2);margin-left:4px}
+  .chip.on small{color:#dbeafe}
+  .bar{height:7px;border-radius:999px;background:#e5e9f0;overflow:hidden;margin-top:9px}
+  .bar > i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+  .tabs{display:flex;gap:2px;padding:8px 10px 0;border-bottom:1px solid var(--line);background:#fbfcfe;flex-wrap:wrap}
+  .tabs button{border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;background:transparent;
+        color:var(--muted);font-size:13px;padding:6px 12px}
+  .tabs button.on{background:#fff;border-color:var(--line);color:var(--accent);font-weight:600;margin-bottom:-1px}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid var(--line2);background:#fff}
+  .toolbar .grow{flex:1;min-width:180px}
+  .toolbar .sep{width:1px;height:20px;background:var(--line2)}
+  .meta{font-size:12px;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--line2);background:#fbfcfe;
+        display:flex;gap:14px;flex-wrap:wrap}
+  .meta b{color:#0f172a;font-weight:600}
+  .tableWrap{overflow:auto;max-height:calc(100vh - 268px)}
+  table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+  th,td{padding:4px 10px;border-bottom:1px solid var(--line2);text-align:left;white-space:nowrap;
+        vertical-align:top;max-width:520px;overflow:hidden;text-overflow:ellipsis}
+  thead th{position:sticky;top:0;background:#f8fafc;color:#475569;font-weight:600;font-size:12px;z-index:2;
+        border-bottom:1px solid var(--line)}
+  tbody tr:nth-child(even){background:#fcfdff}
+  tbody tr:hover{background:var(--accent-soft)}
+  td.num,th.num{text-align:right;font-family:var(--mono)}
+  td.mono{font-family:var(--mono)}
+  td.id{font-family:var(--mono);font-weight:600;color:#0f172a}
+  td.val{font-family:var(--mono);color:#0b7a3e;font-weight:600}
+  td.noname{color:var(--muted2)}
+  td.var{background:#fff7ed}
+  .warnRow{color:var(--warn)}
+  .empty{padding:38px 18px;text-align:center;color:var(--muted)}
+  .empty h2{margin:0 0 6px;font-size:15px;color:#334155;font-weight:600}
+  pre.raw{margin:0;padding:12px;font-family:var(--mono);font-size:12px;line-height:1.45;
+        white-space:pre;overflow:auto;max-height:calc(100vh - 268px);background:#fff}
+  .rawHead{position:sticky;top:0;background:#f8fafc;border-bottom:1px solid var(--line);padding:6px 12px;
+        font-family:var(--mono);font-size:12px;color:#334155;z-index:2}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#0f172a;color:#fff;
+        padding:9px 16px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:.2s;z-index:99}
+  .toast.on{opacity:.95}
+  details.help summary{cursor:pointer;font-size:12.5px;color:#475569;font-weight:600}
+  details.help ul{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--muted);line-height:1.6}
+</style>
+</head>
+<body>
+<header>
+  <h1>SECS 日志解析工具</h1>
+  <span class="sub">按 messageID 配对请求 / 应答，把 <code>&lt;L[]</code> 下的键与值逐项对应（默认 S2F13 → S2F14：ECID =&gt; 值）</span>
+</header>
+
+<div class="app">
+  <aside>
+    <section class="card">
+      <h3><span class="step">1</span>日志文件（可多选 / 可拖入文件夹）</h3>
+      <div class="drop" id="logDrop">
+        把 <b>.txt / .log</b> 文件或整个日期文件夹拖到这里<br>
+        <span class="row" style="justify-content:center;margin-top:8px">
+          <button id="pickLog">选择文件…</button>
+          <button id="pickDir">选择文件夹…</button>
+          <button id="demoBtn">载入示例数据</button>
+        </span>
+      </div>
+      <input type="file" id="logInput" multiple accept=".txt,.log,.secs" hidden>
+      <input type="file" id="dirInput" webkitdirectory multiple hidden>
+      <div class="hint" style="margin-top:8px">常用路径：C:\Users\17140\Desktop\sesloftool\2026917_SW_LOG\Fa\Fa\LogSecslog\<b>日期</b>\</div>
+      <ul class="files" id="fileList"></ul>
+      <div class="row" id="fileActions" style="margin-top:8px" hidden>
+        <button class="ghost" id="clearFiles">清空文件</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3><span class="step">2</span>ECID.cfg（可选，用于把 ID 翻成名称）</h3>
+      <div class="drop" id="ecidDrop">
+        把 <b>ECID.cfg</b> 拖到这里，或 <button id="pickEcid">选择文件…</button>
+      </div>
+      <input type="file" id="ecidInput" accept=".cfg,.txt" hidden>
+      <div class="hint" style="margin-top:8px">常用路径：E:\S25159\CTC\Module_GEM\Cfg\ECID.cfg</div>
+      <div class="status" id="ecidStatus" style="margin-top:8px">未加载（结果里只显示 ID）</div>
+    </section>
+
+    <section class="card">
+      <h3><span class="step">3</span>配对设置</h3>
+      <div class="row">
+        <span class="hint">请求</span><select id="reqCode"></select>
+        <span class="hint">→ 应答</span><select id="repCode"></select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="chk"><input type="checkbox" id="strictAdjacent" checked> 只配“紧邻且 messageID 相同”的一对</label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="chk">从第 <input type="number" id="startPair" value="1" min="1" step="1" style="width:76px"> 对开始，
+          载入 <input type="number" id="maxPairs" value="500" min="1" max="100000" step="100" style="width:88px"> 对</label>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label class="chk"><input type="checkbox" id="keepRaw" checked> 保留原文（关掉可省一半内存）</label>
+      </div>
+      <div class="hint" style="margin-top:6px">想看全部就把“载入”填大一点（例如 30000）；25759 对关掉“保留原文”实测约 135 MB，S2F13 这种几十对随便填。</div>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" id="parseBtn">开始解析</button>
+        <button id="cancelBtn" disabled>取消</button>
+      </div>
+      <div class="bar" id="bar"><i></i></div>
+      <div class="hint" id="progressTxt" style="margin-top:6px">待解析</div>
+      <div class="hint" style="margin-top:9px">日志里识别到的相邻配对（点一下即可切换并重新解析）：</div>
+      <div class="chips" id="detected"><span class="hint">（解析后显示）</span></div>
+    </section>
+
+    <section class="card">
+      <h3><span class="step">4</span>筛选 / 排序</h3>
+      <input type="search" id="filter" placeholder="ECID 或名称关键字，多个可用逗号分隔，如 26555,GPPosHom" style="width:100%">
+      <div class="row" style="margin-top:8px">
+        <select id="sortBy">
+          <option value="log">原顺序（与日志一致）</option>
+          <option value="id">ECID 升序</option>
+          <option value="idDesc">ECID 降序</option>
+          <option value="name">名称 A→Z</option>
+        </select>
+        <label class="chk"><input type="checkbox" id="onlyNamed"> 只看 ECID.cfg 里有名称的</label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="chk"><input type="checkbox" id="onlyChanged"> 横向对比时只看有变化的项</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <details class="help" open>
+        <summary>解析规则说明</summary>
+        <ul>
+          <li>消息头形如 <code>08:06:00.971 S2F13 [H-&gt;E, 9018402]</code>：时间 / 消息码 / 方向 / messageID。</li>
+          <li>配对规则：请求后面<b>紧邻</b>的那条应答，且 messageID 相同，才算一对。</li>
+          <li>键值规则：请求 <code>&lt;L[n]&gt;</code> 下第 i 项是键（如 <code>&lt;U4[1] 26555&gt;</code>），应答同位置的项是值（如 <code>&lt;F8[1] 1.6&gt;</code>），顺序一一对应。</li>
+          <li>ECID.cfg 列：<code>EC | ID | FORMAT | NAME | UNITs | IONAME | IOTYPE</code>，用 ID 查出名称。</li>
+          <li>日志行前面的 <code>2026-09-17 00:21:27.0088 [t:36][Debug]Secslog:</code> 前缀不影响解析；无正文的消息记为 <code>&lt;header only&gt;</code>。</li>
+        </ul>
+      </details>
+    </section>
+  </aside>
+
+  <main>
+    <div class="tabs" id="tabs">
+      <button class="on" data-tab="detail">明细（键 =&gt; 值）</button>
+      <button data-tab="pivot">横向对比（多对并列）</button>
+      <button data-tab="raw">原文</button>
+    </div>
+    <div class="toolbar">
+      <span class="hint">配对：</span>
+      <select id="pairSel" class="grow" disabled></select>
+      <span class="hint">跳到第</span>
+      <input type="number" id="jumpTo" min="1" step="1" style="width:92px" disabled>
+      <button id="jumpBtn" disabled>对</button>
+      <span class="sep"></span>
+      <button id="copyBtn" disabled>复制当前视图</button>
+      <button id="csvBtn" disabled>导出 CSV</button>
+      <button id="jsonBtn" disabled>导出 JSON</button>
+    </div>
+    <div class="meta" id="meta"><span class="hint">导入日志后点击“开始解析”。</span></div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================ CORE BEGIN ============================
+   纯解析逻辑（不依赖 DOM / File API），dev/test-core.mjs 会直接抽取这段代码做验证。
+   ==================================================================== */
+
+// 消息头（可出现在行内任意位置：前面可能有 "2026-09-17 00:21:27.0088 [t:36][Debug]Secslog:" 前缀）
+var SECS_HEADER_RE = /(\d{2}:\d{2}:\d{2}\.\d{1,4})\s+(S\d+F\d+)\s*\[\s*([^,\]]*?)\s*,\s*(\d+)\s*\]/;
+var SECS_HEADER_NO_TS_RE = /(S\d+F\d+)\s*\[\s*([^,\]]*?)\s*,\s*(\d+)\s*\]/;
+var OUTER_TS_RE = /(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}\.\d{1,4})/;
+var ITEM_RE = /^<([A-Za-z]+\d*)\[(\d+)\]\s*(.*?)\s*>\s*$/;   // 单行完整项： <U4[1] 26555  >
+var ITEM_OPEN_RE = /^<([A-Za-z]+\d*)\[(\d+)\]\s*(.*)$/;       // 可能是列表头： <L[4456]
+var HEADER_ONLY = '<header only>';
+
+function parseHeader(line) {
+  var m = SECS_HEADER_RE.exec(line);
+  var time = '', code = '', dir = '', msgId = '', noTs = false;
+  if (m) { time = m[1]; code = m[2]; dir = m[3]; msgId = m[4]; }
+  else {
+    var m2 = SECS_HEADER_NO_TS_RE.exec(line);
+    if (!m2) return null;
+    code = m2[1]; dir = m2[2]; msgId = m2[3]; noTs = true;
+  }
+  var head = code ? line.slice(0, line.indexOf(code)) : '';
+  var outer = OUTER_TS_RE.exec(head);
+  return {
+    time: time, code: code.toUpperCase(), dir: String(dir).trim(), msgId: msgId,
+    date: outer ? outer[1] : '', outerTime: outer ? outer[2] : '', noTs: noTs, raw: line
+  };
+}
+
+// 把一段消息正文（若干行）解析成项树
+function parseBody(lines) {
+  var root = { tag: 'ROOT', count: 0, value: '', children: [] };
+  var stack = [root];
+  for (var i = 0; i < lines.length; i++) {
+    var line = String(lines[i]).trim();
+    if (!line || line === HEADER_ONLY) continue;
+    if (line === '>') { if (stack.length > 1) stack.pop(); continue; }
+    var full = ITEM_RE.exec(line);
+    if (full) {
+      // <L[n] ... > 这种在同一行闭合的（例如 <L[0] >）仍然当成列表处理
+      var isList = (full[1] === 'L');
+      stack[stack.length - 1].children.push({
+        tag: full[1], count: parseInt(full[2], 10),
+        value: isList ? '' : full[3].trim(),
+        children: isList ? [] : null, raw: line
+      });
+      continue;
+    }
+    var open = ITEM_OPEN_RE.exec(line);
+    if (open) {
+      var node = { tag: open[1], count: parseInt(open[2], 10), value: '', children: [], raw: line };
+      stack[stack.length - 1].children.push(node);
+      stack.push(node);
+      continue;
+    }
+    stack[stack.length - 1].children.push({ tag: 'TEXT', count: 0, value: line, children: null, raw: line });
+  }
+  return root.children;
+}
+
+// 键值配对：请求项与应答项按位置一一对应（遇到嵌套列表则递归下去）
+function flattenPairs(reqChildren, resChildren, path, out) {
+  path = path || []; out = out || [];
+  var n = Math.max(reqChildren.length, resChildren.length);
+  for (var i = 0; i < n; i++) {
+    var a = reqChildren[i], b = resChildren[i];
+    var p = path.concat(i);
+    if ((a && a.tag === 'L') || (b && b.tag === 'L')) {
+      flattenPairs((a && a.children) || [], (b && b.children) || [], p, out);
+    } else {
+      out.push({
+        path: p,
+        keyNode: a || null, valNode: b || null,
+        key: a ? a.value : '', keyTag: a ? a.tag : '',
+        value: b ? b.value : '', valTag: b ? b.tag : ''
+      });
+    }
+  }
+  return out;
+}
+
+function nodeText(node) {
+  if (!node) return '';
+  if (node.tag === 'L') return '(' + node.children.map(nodeText).join(' ') + ')';
+  return node.value;
+}
+
+// ECID.cfg：EC  ID  FORMAT  NAME  UNITs  IONAME  IOTYPE
+function parseEcidCfg(text) {
+  var map = new Map(), dup = [], bad = [], total = 0;
+  var lines = String(text).split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var t = lines[i].trim();
+    if (!t || t.charAt(0) === '#') continue;
+    var tok = t.split(/\s+/);
+    if (tok.length < 2 || !/^\d+$/.test(tok[1])) { bad.push(lines[i]); continue; }
+    var rec = {
+      kind: tok[0], id: tok[1], format: tok[2] || '', name: tok[3] || '',
+      unit: tok[4] || '', ioName: tok[5] || '', ioType: tok[6] || '', line: i + 1
+    };
+    total++;
+    var old = map.get(rec.id);
+    if (old) {
+      dup.push(rec.id);
+      if (old.kind !== 'EC' && rec.kind === 'EC') map.set(rec.id, rec);
+    } else map.set(rec.id, rec);
+  }
+  return { map: map, dup: dup, bad: bad, total: total, size: map.size };
+}
+
+function lookupEcid(ecid, key) {
+  if (!ecid || !ecid.map) return null;
+  var k = String(key == null ? '' : key).trim();
+  if (ecid.map.has(k)) return ecid.map.get(k);
+  var n = k.replace(/^0+(?=\d)/, '');
+  if (n !== k && ecid.map.has(n)) return ecid.map.get(n);
+  if (/^\d+$/.test(k)) {
+    var num = String(Number(k));
+    if (ecid.map.has(num)) return ecid.map.get(num);
+  }
+  return null;
+}
+
+// 一对消息 -> 明细行
+function buildRows(pair, ecid) {
+  var entries = flattenPairs(pair.req.items || [], pair.res.items || []);
+  var rows = [];
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i], info = lookupEcid(ecid, e.key);
+    rows.push({
+      no: i + 1,
+      path: e.path.join('.'),
+      id: String(e.key).trim(),
+      name: info ? info.name : '',
+      format: info ? info.format : '',
+      unit: info ? info.unit : '',
+      ioName: info ? info.ioName : '',
+      ioType: info ? info.ioType : '',
+      cfgLine: info ? info.line : 0,
+      keyTag: e.keyTag, valTag: e.valTag,
+      value: e.value,
+      issue: !e.keyNode ? '请求缺项' : (!e.valNode ? '应答缺项' : '')
+    });
+  }
+  return rows;
+}
+
+// 横向对比（多对并列：行 = ECID，列 = 每一次配对）
+function buildPivot(pairs, ecid) {
+  var order = [], map = new Map();
+  for (var ci = 0; ci < pairs.length; ci++) {
+    var rows = buildRows(pairs[ci], ecid);
+    for (var ri = 0; ri < rows.length; ri++) {
+      var r = rows[ri], e = map.get(r.id);
+      if (!e) {
+        e = {
+          id: r.id, name: r.name, unit: r.unit, format: r.format,
+          values: new Array(pairs.length).fill(null), tags: new Array(pairs.length).fill('')
+        };
+        map.set(r.id, e); order.push(r.id);
+      }
+      if (!e.name && r.name) e.name = r.name;
+      e.values[ci] = r.value;
+      e.tags[ci] = r.valTag;
+    }
+  }
+  return { columns: pairs, rows: order.map(function (id) { return map.get(id); }) };
+}
+
+// 收集器：喂日志行，按“紧邻 + messageID 相同”配对
+function createCollector(opts) {
+  opts = opts || {};
+  var reqCode = String(opts.reqCode || '').toUpperCase();
+  var repCode = String(opts.repCode || '').toUpperCase();
+  var maxPairs = opts.maxPairs == null ? 500 : opts.maxPairs;
+  var skipPairs = Math.max(0, opts.skipPairs || 0);
+  var keepRaw = opts.keepRaw !== false;
+  var strict = opts.strictAdjacent !== false;
+  var pairs = [], warnings = [], codeCounts = new Map();
+  var cur = null, pending = null;
+  var stat = { headers: 0, pairs: 0, skipped: 0, unmatchedReq: 0, orphanReply: 0, droppedPairs: 0 };
+
+  function warn(type, msg) { if (warnings.length < 60) warnings.push({ type: type, msg: msg }); }
+  function trimTail(arr) {
+    var i = arr ? arr.length : 0;
+    while (i > 0 && String(arr[i - 1]).trim() === '') i--;
+    return arr.slice(0, i);
+  }
+  function makePair(req, res) {
+    var reqLeaves = flattenPairs(req.items || [], []).length;
+    var resLeaves = flattenPairs(res.items || [], []).length;
+    return {
+      req: { code: req.h.code, time: req.h.time, date: req.h.date, dir: req.h.dir, msgId: req.h.msgId, header: req.h.raw, items: req.items, raw: keepRaw ? trimTail(req.rawLines) : [] },
+      res: { code: res.h.code, time: res.h.time, date: res.h.date, dir: res.h.dir, msgId: res.h.msgId, header: res.h.raw, items: res.items, raw: keepRaw ? trimTail(res.rawLines) : [] },
+      time: req.h.time, date: req.h.date || res.h.date, msgId: req.h.msgId,
+      reqItems: reqLeaves, resItems: resLeaves, itemCount: Math.max(reqLeaves, resLeaves),
+      rawKept: keepRaw, ordinal: stat.pairs - 1
+    };
+  }
+  function close() {
+    if (!cur) return;
+    var m = cur; cur = null;
+    if (!m.body) return;
+    m.items = parseBody(m.body);
+    if (m.h.code === reqCode) {
+      if (pending) warn('req-overlap', '请求 ' + pending.h.code + ' #' + pending.h.msgId + ' 还没配对，就来了新请求 ' + String(m.h.raw).trim());
+      pending = m;
+    } else if (m.h.code === repCode) {
+      if (pending && pending.h.msgId === m.h.msgId) {
+        stat.pairs++;
+        if (stat.pairs <= skipPairs) stat.skipped++;                                  // 跳过窗口之前的对，不占内存
+        else if (pairs.length < maxPairs) pairs.push(makePair(pending, m));
+        else { stat.droppedPairs++; warn('limit', '配对数超过上限 ' + maxPairs + '，多余的对已忽略（可把“最多载入”调大，或用“跳到第 N 对”分段查看）'); }
+        pending = null;
+      } else {
+        stat.orphanReply++;
+        warn('orphan-reply', '应答 ' + m.h.code + ' #' + m.h.msgId + ' 找不到对应的请求');
+      }
+    }
+  }
+  return {
+    stat: stat, pairs: pairs, warnings: warnings, codeCounts: codeCounts,
+    feed: function (line) {
+      var h = parseHeader(line);
+      if (h) {
+        close();
+        stat.headers++;
+        codeCounts.set(h.code, (codeCounts.get(h.code) || 0) + 1);
+        if (pending && !(h.code === repCode && h.msgId === pending.h.msgId)) {
+          stat.unmatchedReq++;
+          warn('no-pair', '请求 ' + pending.h.code + ' #' + pending.h.msgId + ' 的紧邻下一条不是配对应答（实际是 ' + h.code + ' #' + h.msgId + '）');
+          pending = null;
+        }
+        var want = (h.code === reqCode || h.code === repCode);
+        cur = { h: h, body: want ? [] : null, rawLines: want ? [] : null };
+        return;
+      }
+      if (cur && cur.body) { cur.body.push(line); cur.rawLines.push(String(line).replace(/\s+$/, '')); }
+    },
+    finish: function () {
+      close();
+      if (pending) {
+        stat.unmatchedReq++;
+        warn('no-pair', '请求 ' + pending.h.code + ' #' + pending.h.msgId + ' 到日志结束都没有等到应答');
+        pending = null;
+      }
+      return pairs;
+    }
+  };
+}
+
+// 轻量检测：统计日志里所有“相邻且 messageID 相同”的消息对
+function createPairDetector() {
+  var counts = new Map(), prev = null, total = 0;
+  return {
+    counts: counts,
+    feed: function (line) {
+      var h = parseHeader(line);
+      if (!h) return;
+      total++;
+      if (prev && prev.msgId === h.msgId && prev.code !== h.code) {
+        var key = prev.code + '->' + h.code;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      prev = h;
+    },
+    finish: function () { return counts; },
+    messagesSeen: function () { return total; }
+  };
+}
+
+// 是否符合 F+1 的请求/应答约定（仅用于提示，不影响解析）
+function isReplyConvention(reqCode, repCode) {
+  var a = /^S(\d+)F(\d+)$/.exec(reqCode), b = /^S(\d+)F(\d+)$/.exec(repCode);
+  if (!a || !b) return false;
+  return a[1] === b[1] && (parseInt(b[2], 10) === parseInt(a[2], 10) + 1);
+}
+
+/* ============================= CORE END ============================= */
+
+/* ------------------------------- UI ------------------------------- */
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var state = {
+    logFiles: [],
+    ecid: null, ecidName: '',
+    pairs: [], detected: new Map(), warnings: [],
+    reqCode: 'S2F13', repCode: 'S2F14',
+    tab: 'detail', pairIndex: 0,
+    rowsCache: new Map(), pivotCache: null,
+    busy: false, cancel: false, renderLimit: 4000,
+    totalPairs: 0, skipPairs: 0, windowFrom: 1, windowTo: 1, jumpTarget: 0
+  };
+  var DEFAULT_CODES = ['S1F1', 'S1F3', 'S1F4', 'S1F13', 'S1F14', 'S2F13', 'S2F14', 'S2F15', 'S2F16',
+    'S2F31', 'S2F32', 'S2F33', 'S2F34', 'S2F35', 'S2F36', 'S2F37', 'S2F38',
+    'S5F1', 'S5F2', 'S5F3', 'S5F4', 'S6F11', 'S7F19', 'S7F20', 'S14F1', 'S14F2', 'S16F21', 'S16F22'];
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function fmtSize(n) {
+    if (n > 1048576) return (n / 1048576).toFixed(1) + ' MB';
+    if (n > 1024) return (n / 1024).toFixed(0) + ' KB';
+    return n + ' B';
+  }
+  function basename(p) { return String(p || '').split(/[\\/]/).pop(); }
+  var toastTimer = null;
+  function toast(msg, ms) {
+    var el = $('toast'); el.textContent = msg; el.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('on'); }, ms || 2400);
+  }
+  function highlight(text, list) {
+    var s = esc(text);
+    if (!list || !list.length || !text) return s;
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i]; if (!t) continue;
+      var re = new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      s = s.replace(re, function (m0) { return '<mark style="background:#fde68a;color:inherit;border-radius:2px">' + m0 + '</mark>'; });
+    }
+    return s;
+  }
+  function isNum(v) { return v != null && v !== '' && /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(String(v).trim()); }
+  function terms() {
+    return ($('filter').value || '').split(/[\s,，;；]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+  function matchRow(r, ts) {
+    if (!ts.length) return true;
+    var hay = (r.id + ' ' + r.name + ' ' + r.ioName + ' ' + r.unit).toLowerCase();
+    for (var i = 0; i < ts.length; i++) if (hay.indexOf(ts[i].toLowerCase()) >= 0) return true;
+    return false;
+  }
+  function pairLabel(p, idx) {
+    var d = p.date ? p.date + ' ' : '';
+    var no = (p.globalOrdinal != null ? p.globalOrdinal : idx) + 1;
+    return '#' + no + ' · ' + d + p.time + ' · msgID ' + p.msgId + ' · ' + p.reqItems + ' 项' + (p.file ? ' · ' + p.file : '');
+  }
+  function exName(p) {
+    return 'SECS_' + p.req.code + '_' + (p.date || '') + '_' + String(p.time).replace(/[:.]/g, '') + '_msg' + p.msgId;
+  }
+
+  /* ---------- 文件导入 ---------- */
+  function addLogFiles(files) {
+    var added = 0, ecidAdded = false;
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      if (/\.cfg$/i.test(f.name)) { loadEcidFile(f); ecidAdded = true; continue; }
+      if (!/\.(txt|log|secs)$/i.test(f.name)) continue;
+      if (!state.logFiles.some(function (x) { return x.name === f.name && x.size === f.size; })) {
+        state.logFiles.push(f); added++;
+      }
+    }
+    state.logFiles.sort(function (a, b) {
+      var an = a.name, bn = b.name;
+      return an < bn ? -1 : (an > bn ? 1 : 0);
+    });
+    renderFiles();
+    if (added || ecidAdded) toast('已添加 ' + added + ' 个日志文件' + (ecidAdded ? '，并识别到 ECID.cfg' : ''));
+  }
+  function renderFiles() {
+    $('fileList').innerHTML = state.logFiles.map(function (f) {
+      return '<li><span>' + esc(basename(f.webkitRelativePath || f.name)) + '</span><span class="sz">' + fmtSize(f.size) + '</span></li>';
+    }).join('');
+    $('fileActions').hidden = state.logFiles.length === 0;
+  }
+  function loadEcidFile(file) {
+    file.text().then(function (txt) {
+      var parsed = parseEcidCfg(txt);
+      state.ecid = parsed; state.ecidName = file.name;
+      var st = $('ecidStatus');
+      st.className = 'status ok';
+      st.innerHTML = '已加载 <b>' + esc(file.name) + '</b>：' + parsed.size + ' 条 ECID' +
+        (parsed.dup.length ? '<br><span class="warnRow">重复 ID ' + parsed.dup.length + ' 个（保留先出现的）</span>' : '') +
+        (parsed.bad.length ? '<br><span class="warnRow">忽略无法解析的行 ' + parsed.bad.length + ' 行</span>' : '');
+      state.rowsCache.clear(); state.pivotCache = null;
+      if (state.pairs.length) render();
+    });
+  }
+
+  /* ---------- 分块读文件（支持 GBK 回退） ---------- */
+  function makeDecoder(firstBytes) {
+    var probe = firstBytes.length > 8 ? firstBytes.subarray(0, firstBytes.length - 4) : firstBytes;
+    var enc = 'utf-8';
+    try { new TextDecoder('utf-8', { fatal: true }).decode(probe); }
+    catch (e) { enc = 'gbk'; }
+    return { enc: enc, dec: new TextDecoder(enc) };
+  }
+  async function streamFile(file, onLine, onBytes) {
+    var reader = file.stream().getReader();
+    var first = true, box = null, carry = '', read = 0;
+    try {
+      while (true) {
+        if (state.cancel) { try { await reader.cancel(); } catch (e) {} return; }
+        var r = await reader.read();
+        if (r.done) break;
+        var chunk = r.value;
+        read += chunk.byteLength;
+        if (first) { box = makeDecoder(chunk.subarray(0, Math.min(chunk.byteLength, 262144))); first = false; }
+        var text = box.dec.decode(chunk, { stream: true });
+        if (carry) text = carry + text;
+        var parts = text.split('\n');
+        carry = parts.pop();
+        for (var i = 0; i < parts.length; i++) {
+          var l = parts[i];
+          if (l.charCodeAt(l.length - 1) === 13) l = l.slice(0, -1);
+          onLine(l);
+        }
+        onBytes(read);
+      }
+      var tail = carry + box.dec.decode();
+      if (tail !== '') onLine(tail.charCodeAt(tail.length - 1) === 13 ? tail.slice(0, -1) : tail);
+    } finally { try { reader.releaseLock(); } catch (e) {} }
+  }
+
+  /* ---------- 解析主流程 ---------- */
+  function setProgress(pct, text) {
+    $('bar').firstElementChild.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    $('progressTxt').textContent = text;
+  }
+  async function runParse() {
+    if (!state.logFiles.length) { toast('请先导入日志文件'); return; }
+    if (state.busy) return;
+    state.reqCode = $('reqCode').value; state.repCode = $('repCode').value;
+    if (state.reqCode === state.repCode) toast('提示：请求码与应答码相同，一般不是预期的配对');
+    state.busy = true; state.cancel = false;
+    state.pairs = []; state.rowsCache.clear(); state.pivotCache = null; state.renderLimit = 4000;
+    $('parseBtn').disabled = true; $('cancelBtn').disabled = false;
+    var total = state.logFiles.reduce(function (a, f) { return a + f.size; }, 0);
+    var base = 0, t0 = performance.now(), allDetected = new Map(), allWarn = [];
+    var maxPairs = Math.max(1, Math.min(100000, Number($('maxPairs').value) || 500));
+    var skipPairs = Math.max(0, Math.floor(Number($('startPair').value) || 1) - 1);
+    var keepRaw = $('keepRaw').checked;
+    if (keepRaw && maxPairs > 2000) toast('提示：载入 ' + maxPairs + ' 对还保留原文会比较占内存，建议关掉“保留原文”', 4000);
+    var fileBase = 0;                       // 前面文件里已经配到的对数，用来算全局“第 N 对”
+    state.totalPairs = 0; state.orphanReplies = 0; state.unmatchedReqs = 0;
+    state.skipPairs = skipPairs; state.windowFrom = skipPairs + 1;
+    try {
+      for (var fi = 0; fi < state.logFiles.length; fi++) {
+        var f = state.logFiles[fi];
+        var fname = basename(f.webkitRelativePath || f.name);
+        var fileSkip = Math.max(0, skipPairs - fileBase);
+        var fileMax = Math.max(0, maxPairs - state.pairs.length);
+        var col = createCollector({
+          reqCode: state.reqCode, repCode: state.repCode,
+          strictAdjacent: $('strictAdjacent').checked,
+          maxPairs: fileMax, skipPairs: fileSkip, keepRaw: keepRaw
+        });
+        var det = createPairDetector();
+        setProgress((base / (total || 1)) * 100, '解析中… ' + fname);
+        await streamFile(f, function (line) { col.feed(line); det.feed(line); }, function (bytes) {
+          var pct = Math.min(100, ((base + bytes) / (total || 1)) * 100);
+          setProgress(pct, '解析中… ' + fname + '  ' + pct.toFixed(0) + '%');
+        });
+        col.finish(); det.finish();
+        state.totalPairs += col.stat.pairs;
+        state.orphanReplies += col.stat.orphanReply;
+        state.unmatchedReqs += col.stat.unmatchedReq;
+        col.pairs.forEach(function (p) { p.file = fname; p.globalOrdinal = fileBase + p.ordinal; });
+        col.warnings.forEach(function (w) { w.file = fname; });
+        state.pairs = state.pairs.concat(col.pairs);
+        allWarn = allWarn.concat(col.warnings);
+        det.counts.forEach(function (v, k) { allDetected.set(k, (allDetected.get(k) || 0) + v); });
+        fileBase += col.stat.pairs;
+        base += f.size;
+        if (state.cancel) break;
+      }
+      state.detected = allDetected; state.warnings = allWarn;
+      state.pairIndex = 0;
+      var secs = ((performance.now() - t0) / 1000).toFixed(1);
+      if (state.pairs.length) {
+        state.windowFrom = state.pairs[0].globalOrdinal + 1;
+        state.windowTo = state.pairs[state.pairs.length - 1].globalOrdinal + 1;
+      } else {
+        state.windowFrom = skipPairs + 1; state.windowTo = skipPairs + 1;
+      }
+      setProgress(100, (state.cancel ? '已取消，保留已解析结果：' : '完成：') +
+        '共配到 ' + state.totalPairs + ' 对' +
+        (state.pairs.length
+          ? '，已载入第 ' + state.windowFrom + '–' + state.windowTo + ' 对' + (state.skipPairs ? '（跳过前 ' + state.skipPairs + ' 对）' : '')
+          : '，这个范围内没有配对') +
+        '，用时 ' + secs + ' 秒');
+      updateCodeOptions();
+      renderDetected();
+      if (state.jumpTarget) {
+        var want = state.jumpTarget;
+        var found = -1;
+        for (var pi = 0; pi < state.pairs.length; pi++) {
+          if (state.pairs[pi].globalOrdinal + 1 === want) { found = pi; break; }
+        }
+        if (found >= 0) state.pairIndex = found;
+        else if (!state.pairs.length) toast('没有第 ' + want + ' 对：' + state.reqCode + '→' + state.repCode + ' 一共只有 ' + state.totalPairs + ' 对', 4000);
+        else toast('第 ' + want + ' 对不在载入范围内（当前是第 ' + state.windowFrom + '–' + state.windowTo + ' 对）', 4000);
+        state.jumpTarget = 0;
+      }
+      render();
+      if (!state.pairs.length) toast('没有找到 ' + state.reqCode + ' → ' + state.repCode + ' 的配对，可在左侧试试其它配对码');
+    } catch (err) {
+      console.error(err);
+      setProgress(0, '解析出错：' + (err && err.message ? err.message : err));
+      toast('解析出错，请看控制台（F12）');
+    } finally {
+      state.busy = false;
+      $('parseBtn').disabled = false; $('cancelBtn').disabled = true;
+    }
+  }
+
+  function updateCodeOptions() {
+    var set = new Set(DEFAULT_CODES);
+    state.detected.forEach(function (v, k) { k.split('->').forEach(function (c) { set.add(c); }); });
+    var codes = Array.from(set).sort(function (a, b) {
+      var ma = /^S(\d+)F(\d+)$/.exec(a), mb = /^S(\d+)F(\d+)$/.exec(b);
+      if (!ma || !mb) return a < b ? -1 : 1;
+      return Number(ma[1]) - Number(mb[1]) || Number(ma[2]) - Number(mb[2]);
+    });
+    var html = codes.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('');
+    var rq = state.reqCode, rp = state.repCode;
+    $('reqCode').innerHTML = html; $('repCode').innerHTML = html;
+    $('reqCode').value = rq; $('repCode').value = rp;
+  }
+
+  /* ---------- 渲染 ---------- */
+  function renderDetected() {
+    var box = $('detected');
+    var list = Array.from(state.detected.entries()).filter(function (e) { return e[1] > 0; })
+      .sort(function (a, b) { return b[1] - a[1]; });
+    if (!list.length) { box.innerHTML = '<span class="hint">（未识别到相邻配对消息）</span>'; return; }
+    box.innerHTML = list.slice(0, 40).map(function (e) {
+      var parts = e[0].split('->'), on = (parts[0] === state.reqCode && parts[1] === state.repCode);
+      var conv = isReplyConvention(parts[0], parts[1]) ? '' : '?';
+      var tip = parts[0] + ' → ' + parts[1] + '（' + e[1] + ' 对）' + (conv ? '，不符合 F+1 约定，仍可解析' : '');
+      return '<span class="chip' + (on ? ' on' : '') + '" data-req="' + esc(parts[0]) + '" data-rep="' + esc(parts[1]) +
+        '" title="' + esc(tip) + '">' + esc(parts[0] + '→' + parts[1]) + conv + '<small>' + e[1] + '</small></span>';
+    }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.chip'), function (ch) {
+      ch.onclick = function () {
+        if (state.busy) return;
+        $('reqCode').value = ch.dataset.req; $('repCode').value = ch.dataset.rep;
+        runParse();
+      };
+    });
+  }
+  function currentRows() {
+    if (!state.pairs.length) return [];
+    var idx = state.pairIndex;
+    if (!state.rowsCache.has(idx)) state.rowsCache.set(idx, buildRows(state.pairs[idx], state.ecid));
+    return state.rowsCache.get(idx);
+  }
+  function numCmp(a, b) {
+    var na = Number(a), nb = Number(b);
+    if (isFinite(na) && isFinite(nb) && String(a).trim() !== '' && String(b).trim() !== '') return na - nb;
+    return String(a) < String(b) ? -1 : (String(a) > String(b) ? 1 : 0);
+  }
+  function sortRows(rows) {
+    var by = $('sortBy').value, copy = rows.slice();
+    if (by === 'id') copy.sort(function (a, b) { return numCmp(a.id, b.id); });
+    else if (by === 'idDesc') copy.sort(function (a, b) { return numCmp(b.id, a.id); });
+    else if (by === 'name') copy.sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+    return copy;
+  }
+  function filterRows(rows, ts) {
+    var onlyNamed = $('onlyNamed').checked;
+    return rows.filter(function (r) { return (!onlyNamed || r.name) && matchRow(r, ts); });
+  }
+  function render() {
+    var has = state.pairs.length > 0;
+    $('pairSel').disabled = !has;
+    $('copyBtn').disabled = !has; $('csvBtn').disabled = !has; $('jsonBtn').disabled = !has;
+    $('jumpTo').disabled = !has; $('jumpBtn').disabled = !has;
+    if (!has) {
+      $('meta').innerHTML = '<span class="hint">导入日志后点击“开始解析”。</span>';
+      $('view').innerHTML = '<div class="empty"><h2>还没有解析结果</h2>' +
+        '① 拖入日志文件 → ②（可选）拖入 ECID.cfg → ③ 选择请求/应答码 → ④ 点“开始解析”</div>';
+      return;
+    }
+    var sel = $('pairSel');
+    if (sel.options.length !== state.pairs.length || sel.dataset.req !== state.reqCode || sel.dataset.rep !== state.repCode) {
+      sel.dataset.req = state.reqCode; sel.dataset.rep = state.repCode;
+      sel.innerHTML = state.pairs.map(function (p, i) { return '<option value="' + i + '">' + esc(pairLabel(p, i)) + '</option>'; }).join('');
+    }
+    sel.value = String(state.pairIndex);
+    if (!$('jumpTo').value) $('jumpTo').value = String((state.pairs[0].globalOrdinal || 0) + 1);
+
+    var p = state.pairs[state.pairIndex];
+    var ts = terms();
+    var from = state.windowFrom || ((state.pairs[0].globalOrdinal || 0) + 1);
+    var to = state.windowTo || ((state.pairs[state.pairs.length - 1].globalOrdinal || 0) + 1);
+    var trunc = (state.totalPairs || state.pairs.length) > state.pairs.length
+      ? '<span class="warnRow" title="在左侧“配对设置”里改“从第 N 对开始 / 载入 M 对”后重新解析，或在右上“跳到第 N 对”直接跳">共 <b>' + state.totalPairs + '</b> 对，当前只载入了第 <b>' + from + '–' + to + '</b> 对</span>'
+      : '<span>本次共 <b>' + state.pairs.length + '</b> 对</span>';
+    var warnTxt = state.warnings.length
+      ? '<span class="warnRow" title="' + esc(state.warnings.slice(0, 20).map(function (w) { return w.msg; }).join('\n')) + '">异常记录 ' + state.warnings.length + ' 条' +
+        (state.unmatchedReqs ? '（未配对请求 ' + state.unmatchedReqs + '）' : '') + (state.orphanReplies ? '（孤儿应答 ' + state.orphanReplies + '）' : '') + '</span>'
+      : '<span style="color:var(--ok)">配对全部正常</span>';
+    $('meta').innerHTML =
+      '<span>请求 <b>' + esc(p.req.code) + '</b> ' + esc((p.date ? p.date + ' ' : '') + p.req.time) + '（' + esc(p.req.dir) + '）</span>' +
+      '<span>应答 <b>' + esc(p.res.code) + '</b> ' + esc(p.res.time) + '（' + esc(p.res.dir) + '）</span>' +
+      '<span>messageID <b>' + esc(p.msgId) + '</b></span>' +
+      '<span>请求项 <b>' + p.reqItems + '</b> / 应答项 <b>' + p.resItems + '</b></span>' +
+      trunc +
+      '<span>ECID.cfg：' + (state.ecid
+        ? '<b>' + state.ecid.size + ' 条</b>（' + esc(state.ecidName || '已加载') + '）'
+        : '<b class="warnRow">未加载</b>，只显示 ID 没有名称') + '</span>' +
+      '<span>' + warnTxt + '</span>';
+
+    if (state.tab === 'detail') renderDetail(p, ts);
+    else if (state.tab === 'pivot') renderPivot(ts);
+    else renderRaw(p);
+  }
+  function renderDetail(p, ts) {
+    var rows = filterRows(sortRows(currentRows()), ts);
+    var limit = Math.min(rows.length, state.renderLimit);
+    var html = ['<div class="tableWrap"><table><thead><tr>',
+      '<th class="num">#</th><th>ECID</th><th>名称（ECID.cfg）</th><th>值（应答）</th>',
+      '<th>应答类型</th><th>CFG 格式</th><th>单位</th><th>IONAME</th><th>IO 类型</th><th>备注</th>',
+      '</tr></thead><tbody>'];
+    for (var i = 0; i < limit; i++) {
+      var r = rows[i];
+      html.push('<tr>' +
+        '<td class="num">' + (i + 1) + '</td>' +
+        '<td class="id">' + highlight(r.id, ts) + '</td>' +
+        '<td' + (r.name ? '' : ' class="noname"') + ' title="' + esc(r.ioName) + '">' + (r.name ? highlight(r.name, ts) : '—') + '</td>' +
+        '<td class="val' + (isNum(r.value) ? ' num' : '') + '">' + esc(r.value) + '</td>' +
+        '<td class="mono">' + esc(r.valTag || '—') + '</td>' +
+        '<td class="mono">' + esc(r.format || '—') + '</td>' +
+        '<td>' + esc(r.unit || '—') + '</td>' +
+        '<td class="mono" title="' + esc(r.ioName) + '">' + esc(r.ioName || '—') + '</td>' +
+        '<td>' + esc(r.ioType || '—') + '</td>' +
+        '<td class="warnRow">' + esc(r.issue || '') + '</td>' +
+        '</tr>');
+    }
+    html.push('</tbody></table></div>');
+    if (rows.length > limit) {
+      html.push('<div class="empty" style="padding:14px">已显示前 ' + limit + ' 行，共 ' + rows.length + ' 行 ' +
+        '<button id="moreBtn">再显示 3000 行</button></div>');
+    }
+    $('view').innerHTML = html.join('');
+    var more = $('moreBtn');
+    if (more) more.onclick = function () { state.renderLimit += 3000; render(); };
+  }
+  function renderPivot(ts) {
+    var maxCols = 25;
+    var pairs = state.pairs.slice(0, maxCols);
+    if (!state.pivotCache || state.pivotCache.src.length !== pairs.length || state.pivotCache.src[0] !== pairs[0] || state.pivotCache.src[pairs.length - 1] !== pairs[pairs.length - 1]) {
+      state.pivotCache = { src: pairs, data: buildPivot(pairs, state.ecid) };
+    }
+    var pv = state.pivotCache.data;
+    var onlyChanged = $('onlyChanged').checked;
+    var onlyNamed = $('onlyNamed').checked;
+    var rows = pv.rows.filter(function (r) {
+      if (onlyNamed && !r.name) return false;
+      if (!matchRow({ id: r.id, name: r.name, ioName: '', unit: r.unit }, ts)) return false;
+      if (onlyChanged) {
+        var seen = new Set(), diff = false;
+        for (var i = 0; i < r.values.length; i++) {
+          var v = r.values[i];
+          if (v == null) continue;
+          if (seen.size && !seen.has(v)) diff = true;
+          seen.add(v);
+        }
+        if (!diff) return false;
+      }
+      return true;
+    });
+    var limit = Math.min(rows.length, state.renderLimit);
+    var html = ['<div class="tableWrap"><table><thead><tr><th class="num">#</th><th>ECID</th><th>名称</th>'];
+    for (var c = 0; c < pv.columns.length; c++) {
+      var pp = pv.columns[c];
+      html.push('<th class="num" title="' + esc('msgID ' + pp.msgId + (pp.file ? ' ' + pp.file : '')) + '">' +
+        esc((pp.date ? pp.date.slice(5) + ' ' : '') + pp.time) + '</th>');
+    }
+    html.push('</tr></thead><tbody>');
+    for (var i2 = 0; i2 < limit; i2++) {
+      var rr = rows[i2], first = null;
+      for (var k = 0; k < rr.values.length; k++) if (rr.values[k] != null) { first = rr.values[k]; break; }
+      html.push('<tr><td class="num">' + (i2 + 1) + '</td><td class="id">' + highlight(rr.id, ts) + '</td>' +
+        '<td' + (rr.name ? '' : ' class="noname"') + '>' + (rr.name ? highlight(rr.name, ts) : '—') + '</td>');
+      for (var j = 0; j < rr.values.length; j++) {
+        var v = rr.values[j], changed = (v != null && first != null && v !== first);
+        html.push('<td class="num' + (changed ? ' var' : '') + ' val">' + esc(v == null ? '—' : v) + '</td>');
+      }
+      html.push('</tr>');
+    }
+    html.push('</tbody></table></div>');
+    if (state.pairs.length > maxCols) html.push('<div class="empty" style="padding:12px">共 ' + state.pairs.length + ' 对，这里只并列显示前 ' + maxCols + ' 对（导出也同样）</div>');
+    if (rows.length > limit) html.push('<div class="empty" style="padding:12px">已显示前 ' + limit + ' 行，共 ' + rows.length + ' 行 <button id="moreBtn">再显示 3000 行</button></div>');
+    $('view').innerHTML = html.join('');
+    var more = $('moreBtn');
+    if (more) more.onclick = function () { state.renderLimit += 3000; render(); };
+  }
+  function rawText(p) {
+    var reqTxt = [String(p.req.header)] .concat(p.req.raw || []).join('\n');
+    var resTxt = [String(p.res.header)].concat(p.res.raw || []).join('\n');
+    return { req: reqTxt, res: resTxt };
+  }
+  function renderRaw(p) {
+    if (p.rawKept === false) {
+      $('view').innerHTML = '<div class="empty"><h2>这一轮没有保留原文</h2>' +
+        '左侧“配对设置”里的“保留原文”被关掉了（省内存）。<br>勾上它再点“开始解析”，就能看这一对的原始文本。</div>';
+      return;
+    }
+    var t = rawText(p);
+    $('view').innerHTML =
+      '<div class="rawHead">' + esc(p.req.code + ' 请求原文（' + p.req.dir + '，messageID ' + p.msgId + '）') + '</div>' +
+      '<pre class="raw">' + esc(t.req) + '</pre>' +
+      '<div class="rawHead">' + esc(p.res.code + ' 应答原文（' + p.res.dir + '，messageID ' + p.msgId + '）') + '</div>' +
+      '<pre class="raw">' + esc(t.res) + '</pre>';
+  }
+
+  /* ---------- 导出 ---------- */
+  function currentExport() {
+    var p = state.pairs[state.pairIndex], ts = terms();
+    if (state.tab === 'raw') {
+      var t = rawText(p);
+      return { head: ['说明', '内容'], body: [[p.req.code + ' #' + p.msgId, t.req], [p.res.code + ' #' + p.msgId, t.res]], name: exName(p), raw: t.req + '\n' + t.res };
+    }
+    if (state.tab === 'pivot') {
+      var pairs = state.pairs.slice(0, 25);
+      var pv = buildPivot(pairs, state.ecid);
+      var head = ['ECID', '名称', '单位'].concat(pv.columns.map(function (pp) { return (pp.date ? pp.date + ' ' : '') + pp.time; }));
+      var body = pv.rows.map(function (r) { return [r.id, r.name, r.unit].concat(r.values.map(function (v) { return v == null ? '' : v; })); });
+      return { head: head, body: body, name: 'SECS_' + state.reqCode + '_对比' };
+    }
+    var rows = filterRows(sortRows(currentRows()), ts);
+    var head2 = ['序号', 'ECID', '名称', '值', '应答类型', 'CFG格式', '单位', 'IONAME', 'IO类型', '备注'];
+    var body2 = rows.map(function (r, i) {
+      return [i + 1, r.id, r.name, r.value, r.valTag, r.format, r.unit, r.ioName, r.ioType, r.issue];
+    });
+    return { head: head2, body: body2, name: exName(p) };
+  }
+  function toCSV(head, body) {
+    var q = function (v) { var s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    return '\ufeff' + [head.map(q).join(',')].concat(body.map(function (r) { return r.map(q).join(','); })).join('\r\n');
+  }
+  function toTSV(head, body) {
+    return [head.join('\t')].concat(body.map(function (r) {
+      return r.map(function (v) { return String(v == null ? '' : v).replace(/[\t\r\n]/g, ' '); }).join('\t');
+    })).join('\r\n');
+  }
+  function download(text, filename, mime) {
+    var blob = new Blob([text], { type: mime || 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast('已导出 ' + filename);
+  }
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); toast('已复制到剪贴板'); }
+    catch (e) {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast('已复制到剪贴板'); }
+      catch (e2) { toast('复制失败，请手动选择表格'); }
+      ta.remove();
+    }
+  }
+
+  /* ---------- 事件 ---------- */
+  function bindDrop(el, onFiles) {
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      el.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); el.classList.add('over'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      el.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); el.classList.remove('over'); });
+    });
+    el.addEventListener('drop', async function (e) {
+      var items = e.dataTransfer && e.dataTransfer.items, out = [];
+      if (items && items.length && items[0].webkitGetAsEntry) {
+        var entries = [];
+        for (var i = 0; i < items.length; i++) { var en = items[i].webkitGetAsEntry(); if (en) entries.push(en); }
+        for (var j = 0; j < entries.length; j++) await walkEntry(entries[j], out);
+      } else if (e.dataTransfer && e.dataTransfer.files) {
+        out = Array.prototype.slice.call(e.dataTransfer.files);
+      }
+      if (out.length) onFiles(out); else toast('没有读到文件（文件夹拖入需要 Chrome / Edge）');
+    });
+  }
+  async function walkEntry(entry, out) {
+    if (entry.isFile) {
+      await new Promise(function (res) {
+        entry.file(function (f) { f.webkitRelativePath = entry.fullPath || f.name; out.push(f); res(); }, function () { res(); });
+      });
+    } else if (entry.isDirectory) {
+      var reader = entry.createReader(), all = [];
+      while (true) {
+        var batch = await new Promise(function (res) { reader.readEntries(function (r) { res(r); }, function () { res([]); }); });
+        if (!batch.length) break;
+        all = all.concat(batch);
+      }
+      for (var i = 0; i < all.length; i++) await walkEntry(all[i], out);
+    }
+  }
+  bindDrop($('logDrop'), addLogFiles);
+  bindDrop($('ecidDrop'), function (files) {
+    var f = files.filter(function (x) { return /\.cfg$/i.test(x.name); })[0] || files[0];
+    if (f) loadEcidFile(f);
+  });
+  $('pickLog').onclick = function () { $('logInput').click(); };
+  $('pickDir').onclick = function () { $('dirInput').click(); };
+  $('pickEcid').onclick = function () { $('ecidInput').click(); };
+  $('logInput').onchange = function (e) { addLogFiles(Array.prototype.slice.call(e.target.files)); e.target.value = ''; };
+  $('dirInput').onchange = function (e) { addLogFiles(Array.prototype.slice.call(e.target.files)); e.target.value = ''; };
+  $('ecidInput').onchange = function (e) { if (e.target.files[0]) loadEcidFile(e.target.files[0]); e.target.value = ''; };
+  $('clearFiles').onclick = function () {
+    state.logFiles = []; state.pairs = []; state.detected = new Map(); state.warnings = [];
+    state.rowsCache.clear(); state.pivotCache = null;
+    renderFiles(); renderDetected(); render(); setProgress(0, '待解析');
+  };
+  $('parseBtn').onclick = function () { runParse(); };
+  $('cancelBtn').onclick = function () { state.cancel = true; $('cancelBtn').disabled = true; };
+  $('pairSel').onchange = function () { state.pairIndex = Number($('pairSel').value) || 0; render(); };
+  // 跳到第 N 对：在已载入范围内就直接选中，超出范围就以它为起点重新解析
+  async function jumpToPair(n) {
+    n = Math.max(1, Math.floor(Number(n) || 1));
+    if (state.busy) { toast('正在解析，请稍候'); return; }
+    for (var i = 0; i < state.pairs.length; i++) {
+      if (state.pairs[i].globalOrdinal + 1 === n) {
+        state.pairIndex = i; render();
+        toast('已跳到第 ' + n + ' 对');
+        return;
+      }
+    }
+    $('startPair').value = n;
+    state.jumpTarget = n;
+    toast('第 ' + n + ' 对不在当前范围内，正在从第 ' + n + ' 对重新解析…');
+    await runParse();
+  }
+  $('jumpBtn').onclick = function () { return jumpToPair($('jumpTo').value); };
+  $('jumpTo').onkeydown = function (e) { if (e.key === 'Enter') jumpToPair($('jumpTo').value); };
+  Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function (b) {
+    b.onclick = function () {
+      Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function (x) { x.classList.remove('on'); });
+      b.classList.add('on'); state.tab = b.dataset.tab; render();
+    };
+  });
+  var debounce = null;
+  $('filter').oninput = function () { clearTimeout(debounce); debounce = setTimeout(render, 180); };
+  $('sortBy').onchange = render;
+  $('onlyNamed').onchange = render;
+  $('onlyChanged').onchange = render;
+  $('copyBtn').onclick = function () {
+    var ex = currentExport();
+    copyText(state.tab === 'raw' ? ex.raw : toTSV(ex.head, ex.body));
+  };
+  $('csvBtn').onclick = function () {
+    var ex = currentExport();
+    download(toCSV(ex.head, ex.body), ex.name + '.csv');
+  };
+  $('jsonBtn').onclick = function () {
+    var p = state.pairs[state.pairIndex];
+    var data = {
+      request: { code: p.req.code, time: p.req.time, date: p.date, dir: p.req.dir, msgId: p.msgId },
+      reply: { code: p.res.code, time: p.res.time, dir: p.res.dir, msgId: p.msgId },
+      items: currentRows().map(function (r) {
+        return { index: r.no, ecid: r.id, name: r.name, value: r.value, type: r.valTag, format: r.format, unit: r.unit, ioName: r.ioName, ioType: r.ioType, issue: r.issue };
+      })
+    };
+    download(JSON.stringify(data, null, 2), exName(p) + '.json', 'application/json');
+  };
+
+  updateCodeOptions();
+  render();
+
+  // 内置示例：不导入任何文件也能先跑通一遍，顺便方便排查工具本身的问题
+  var DEMO_LOG = [
+    '2026-09-17 08:06:01.0102 [t:36][Debug]Secslog:08:06:00.900 S1F1 [H->E, 9018401]',
+    '<header only>',
+    '08:06:00.905 S1F2 [E->H, 9018401]',
+    '   <L[2] ',
+    '      <A[6] S25159 >',
+    '      <A[16] ver1.0_RmsVer2.0 >',
+    '   >',
+    '2026-09-17 08:06:01.3102 [t:36][Debug]Secslog:08:06:00.971 S2F13 [H->E, 9018402]',
+    '   <L[6] ',
+    '      <U4[1] 26555  >',
+    '      <U4[1] 26557  >',
+    '      <U4[1] 36809  >',
+    '      <U4[1] 61303  >',
+    '      <U4[1] 10011  >',
+    '      <U4[1] 48301  >',
+    '   >',
+    '08:06:01.237 S2F14 [E->H, 9018402]',
+    '   <L[6] ',
+    '      <F8[1] 1.6  >',
+    '      <F8[1] 241.69  >',
+    '      <F8[1] 3.2  >',
+    '      <U4[1] 15  >',
+    '      <U4[1] 3600  >',
+    '      <F8[1] 22  >',
+    '   >',
+    '2026-09-17 12:12:35.0102 [t:36][Debug]Secslog:12:12:33.298 S2F13 [H->E, 9019404]',
+    '   <L[6] ',
+    '      <U4[1] 26555  >',
+    '      <U4[1] 26557  >',
+    '      <U4[1] 36809  >',
+    '      <U4[1] 61303  >',
+    '      <U4[1] 10011  >',
+    '      <U4[1] 48301  >',
+    '   >',
+    '12:12:33.470 S2F14 [E->H, 9019404]',
+    '   <L[6] ',
+    '      <F8[1] 1.6  >',
+    '      <F8[1] 242.05  >',
+    '      <F8[1] 3.2  >',
+    '      <U4[1] 15  >',
+    '      <U4[1] 3600  >',
+    '      <F8[1] 22  >',
+    '   >',
+    '12:15:00.100 S2F13 [H->E, 9019410]',
+    '   <L[6] ',
+    '      <U4[1] 26555  >',
+    '      <U4[1] 26557  >',
+    '      <U4[1] 36809  >',
+    '      <U4[1] 61303  >',
+    '      <U4[1] 10011  >',
+    '      <U4[1] 48301  >',
+    '   >',
+    '12:15:00.230 S1F13 [H->E, 9019411]',
+    '   <L[0] >',
+    '12:15:00.250 S2F14 [E->H, 9019410]',
+    '   <L[6] ',
+    '      <F8[1] 1.6  >',
+    '      <F8[1] 242.05  >',
+    '      <F8[1] 3.2  >',
+    '      <U4[1] 15  >',
+    '      <U4[1] 3600  >',
+    '      <F8[1] 22  >',
+    '   >',
+  ].join('\r\n');
+  var DEMO_CFG = [
+    '# 示例 ECID.cfg（列：EC ID FORMAT NAME UNITs IONAME IOTYPE）',
+    'EC\t26555\tFLT8\tSDC8_GPPosHom\t-\tSDC8_GPPosHom\tA',
+    'EC\t26557\tFLT8\tSDC8_GPPosorigin\t-\tSDC8_GPPosorigin\tA',
+    'EC\t36809\tFLT8\tSWEE1_UVRate\t-\tSWEE1_UV_Rate\tA',
+    'EC\t61303\tUINT8\tDrnDummy_Dispense_Time\t-\tA_DrnDummyDisTime\tD',
+    'EC\t10011\tUINT4\tGEM_SPOOL_MAXTRANSMIT\t-\tGEM.MaxSpoolTransmit\tD',
+    'EC\t48301\tFLT8\tRRC_CPS12_AddWaitTime\tSec\tRRC.CPS12_AddWaitTime\tA',
+  ].join('\r\n');
+  $('demoBtn').onclick = function () {
+    state.logFiles = []; state.rowsCache.clear(); state.pivotCache = null;
+    $('startPair').value = 1;
+    addLogFiles([new File([DEMO_LOG], '示例日志-S2F13.txt')]);
+    loadEcidFile(new File([DEMO_CFG], '示例-ECID.cfg（只有 6 条）'));
+    $('reqCode').value = 'S2F13'; $('repCode').value = 'S2F14';
+    runParse();
+  };
+
+  // 调试入口（浏览器控制台可用）：__secsTool.addLogFiles([file]) / __secsTool.runParse()
+  window.__secsTool = {
+    state: state, addLogFiles: addLogFiles, loadEcidFile: loadEcidFile,
+    runParse: runParse, render: render, renderDetected: renderDetected,
+    parseEcidCfg: parseEcidCfg, parseBody: parseBody, buildRows: buildRows, buildPivot: buildPivot
+  };
+})();
+</script>
+</body>
+</html>
