@@ -2,6 +2,11 @@
 build/
 *.obj
 
+# 前端（Node）相关
+node_modules/
+dist/
+.npm-cache/
+
 
 # 压缩包不提交
 *.zip

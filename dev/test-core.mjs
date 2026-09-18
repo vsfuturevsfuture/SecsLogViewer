@@ -1,26 +1,17 @@
-// Extracts the CORE block straight out of index.html (so we test exactly what ships)
-// and runs it against the real log + ECID.cfg.
+// 直接 import src/core 里的两个模块（构建产物用的就是它们），跑真实日志 + 真实配置做断言。
 import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
+import * as coreModule from '../src/core/secs-core.js';
+import * as dictModule from '../src/core/secs-dict.js';
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
-const html = fs.readFileSync(path.join(here, '..', 'index.html'), 'utf8');
-const beginAt = html.indexOf('CORE BEGIN');
-const endAt = html.indexOf('CORE END');
-if (beginAt < 0 || endAt < 0) throw new Error('CORE 标记找不到');
-// 从 "/* ... CORE BEGIN ..." 注释块开头，切到 "/* ... CORE END ..." 注释块开头
-const core = html.slice(html.lastIndexOf('/*', beginAt), html.lastIndexOf('/*', endAt));
-
-const api = new Function(core + `
-  return { parseHeader, parseBody, flattenPairs, parseEcidCfg, lookupEcid, buildRows, buildPivot,
-           createCollector, createPairDetector, isReplyConvention, nodeText,
-           secsInfo, parseSecsDict, secsDictCsv, csvSplitLine, SECS_MESSAGES, SECS_STREAMS };
-`)();
+const api = Object.assign({}, coreModule, dictModule);
 
 const LOG = 'C:\\Users\\17140\\Desktop\\sesloftool\\2026917_SW_LOG\\Fa\\Fa\\LogSecslog\\2026-09-17\\2026-09-17.txt';
 const CFG_S25159 = 'E:\\S25159\\CTC\\Module_GEM\\Cfg\\ECID.cfg';
 const CFG_WS = 'E:\\s26042\\CTC\\Module_GEM\\Cfg\\ECID.cfg';
+const CFG_SVID = 'C:\\Users\\17140\\Desktop\\sesloftool\\SVID.cfg';
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -177,7 +168,7 @@ check('干扰后被配上的键值仍然正确', rows3[0].value === '1.6' && row
 
 /* ---------- 8) 分段载入：只要第 601 对 ---------- */
 console.log('\n[8] 分段载入（从第 N 对开始 / 不保留原文）');
-const all = api.createCollector({ reqCode: 'S1F3', repCode: 'S1F4', maxPairs: 100000 });
+const all = api.createCollector({ reqCode: 'S1F3', repCode: 'S1F4', maxPairs: 100000, keepRaw: false });
 for (const line of lines) all.feed(line);
 all.finish();
 const col4 = api.createCollector({ reqCode: 'S1F3', repCode: 'S1F4', skipPairs: 600, maxPairs: 5 });
@@ -231,6 +222,74 @@ const missing = seenCodes.filter((c) => !api.secsInfo(c).known);
 console.log('        日志里出现的消息码（' + seenCodes.length + ' 种）：' + seenCodes.join(' '));
 check('日志里出现的每种消息都能查到含义（未收录：' + (missing.join(' ') || '无') + '）', missing.length === 0, missing);
 check('S16F21 在日志里出现过 2 次', col.codeCounts.get('S16F21') === 2, col.codeCounts.get('S16F21'));
+
+/* ---------- 11) 名称表按消息分流（S1 -> SVID，S2 -> ECID） ---------- */
+console.log('\n[11] 名称表分流');
+const svid = api.parseNameTable(fs.readFileSync(CFG_SVID, 'utf8'));
+check('SVID.cfg 解析出 1721 条', svid.size === 1721, svid.size);
+check('SVID.cfg 认成 SVID 类型（SV/DV）', svid.type === 'SVID' && !!svid.kinds.SV && !!svid.kinds.DV, svid.kinds);
+check('ECID.cfg 认成 ECID 类型', api.parseNameTable(fs.readFileSync(CFG_S25159, 'utf8')).type === 'ECID');
+check('按文件名猜角色', api.guessTableRole('SVID.cfg', null) === 'SVID' && api.guessTableRole('ECID.cfg', null) === 'ECID');
+check('按内容猜角色（文件名看不出时）', api.guessTableRole('abc.cfg', svid) === 'SVID');
+check('默认分流：S1 流 -> SVID，S2 流 -> ECID',
+  api.defaultRoleForCode('S1F3') === 'SVID' && api.defaultRoleForCode('S2F13') === 'ECID' && api.defaultRoleForCode('S6F11') === null,
+  [api.defaultRoleForCode('S1F3'), api.defaultRoleForCode('S2F13'), api.defaultRoleForCode('S6F11')]);
+
+const resolver = api.nameResolver({ SVID: svid, ECID: cfgS }, {});
+check('S1F3 查到的是 SVID 表', resolver.pick('S1F3') === svid);
+check('S2F13 查到的是 ECID 表', resolver.pick('S2F13') === cfgS);
+check('没规则的流默认没有表', resolver.pick('S6F11') === null);
+const resolver2 = api.nameResolver({ SVID: svid, ECID: cfgS }, { S2F13: 'SVID' });
+check('可以手工把 S2F13 改指到 SVID 表', resolver2.pick('S2F13') === svid);
+const resolver3 = api.nameResolver({ SVID: svid }, { S2F13: '' });
+check('可以显式指定“这个码不用表”', resolver3.pick('S2F13') === null);
+const resolver4 = api.nameResolver({ ECID: cfgS }, {}, 'ECID');
+check('只导入一张表时可当兜底', resolver4.pick('S1F3') === cfgS);
+
+// S1F3 的键到底在哪张表里 —— 用真实日志验证
+const s1pair = all.pairs[0];
+const rowsSvid = api.buildRows(s1pair, resolver);
+const rowsEcid = api.buildRows(s1pair, cfgS);
+const namedSvid = rowsSvid.filter((r) => r.name).length;
+const namedEcid = rowsEcid.filter((r) => r.name).length;
+console.log('        第一对 S1F3 共 ' + rowsSvid.length + ' 项：SVID 表查到名称 ' + namedSvid + ' 个，ECID 表查到 ' + namedEcid + ' 个');
+check('S1F3 的键用 SVID 表能全部查到名称', namedSvid === rowsSvid.length && rowsSvid.length === 74, { namedSvid, total: rowsSvid.length });
+check('用 ECID 表查 S1F3 会大面积查不到（说明分流是必要的）', namedEcid < namedSvid, { namedEcid, namedSvid });
+check('行里带了名称来源', rowsSvid.every((r) => r.tableRole === 'SVID') && rowsEcid.every((r) => r.tableRole === ''));
+check('S2F13 的键用 ECID 表能全部查到名称',
+  api.buildRows(col.pairs[0], api.nameResolver({ SVID: svid, ECID: cfgS }, {})).every((r) => r.name && r.tableRole === 'ECID'));
+
+/* ---------- 12) 趋势数据（折线图的数据层） ---------- */
+console.log('\n[12] 趋势数据');
+check('一对消息的时间能转成秒', Math.abs(api.pairSeconds({ time: '08:06:00.971' }) - (8 * 3600 + 6 * 60 + 0.971)) < 1e-6);
+check('带日期的能跨天正确定序',
+  api.pairSeconds({ date: '2026-09-17', time: '23:59:59' }) < api.pairSeconds({ date: '2026-09-18', time: '00:00:01' }));
+check('时间格式化', api.fmtSeconds(8 * 3600 + 6 * 60 + 0.971) === '08:06:00.971', api.fmtSeconds(8 * 3600 + 6 * 60 + 0.971));
+const series = api.collectSeries(all.pairs, resolver, ['48341', '32001']);
+check('抽出了两条序列', series.length === 2 && series[0].code === '48341', series.map((s) => s.code));
+// 注意：S1F3 每次轮询的 SVID 列表并不完全相同，所以单条 SVID 的样本数会小于配对数
+console.log('        48341 出现 ' + series[0].count + ' 次 / 32001 出现 ' + series[1].count + ' 次（共 ' + all.pairs.length + ' 对）');
+check('单条 SVID 的样本数在 (0, 配对数] 之间', series[0].count > 0 && series[0].count <= all.pairs.length &&
+  series[1].count > 0 && series[1].count <= all.pairs.length, series.map((s) => s.count));
+check('序列按时间升序', series[0].points.every((p, i, a) => i === 0 || a[i - 1][0] <= p[0]));
+check('序列带上了 SVID 名称', series[0].name === 'SCPQ15_Temp_PV', series[0].name);
+check('统计值算得对', series[0].min <= series[0].avg && series[0].avg <= series[0].max && isFinite(series[0].last),
+  { min: series[0].min, max: series[0].max, avg: series[0].avg, last: series[0].last });
+const onlyNumeric = api.collectSeries(col.pairs, api.nameResolver({ SVID: svid, ECID: cfgS }, {}), ['26555', 'NO_SUCH_ID']);
+check('非数值/不存在的变量不会崩，能自动忽略', onlyNumeric[0].count === 13 && onlyNumeric[1].count === 0, onlyNumeric.map((s) => s.count));
+
+// 降采样：尖峰不能丢
+const spike = [];
+for (let i = 0; i < 5000; i++) spike.push([i, i === 2500 ? 999 : (i % 7) - 3]);
+const small = api.downsampleMinMax(spike, 200);
+check('降采样后点数明显变少', small.length <= 500, small.length);
+check('降采样保留了尖峰', small.some((p) => p[1] === 999));
+check('降采样保留最小值', small.some((p) => p[1] === -3));
+check('点数本来就少时原样返回', api.downsampleMinMax([[0, 1], [1, 2]], 100).length === 2);
+const sc = api.niceScale(3.7, 812.4, 5);
+check('Y 轴刻度覆盖数据范围', sc.min <= 3.7 && sc.max >= 812.4 && sc.ticks.length >= 4, sc);
+check('刻度是“好看”的步长', /^[125]\d*$/.test(String(sc.step).replace('.', '')), sc.step);
+check('数字格式化', api.fmtNum(241.69) === '241.69' && api.fmtNum(0) === '0');
 
 console.log('\n' + (failures ? '有 ' + failures + ' 项失败' : '全部通过 ✔'));
 process.exit(failures ? 1 : 0);

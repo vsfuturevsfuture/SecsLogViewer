@@ -1,24 +1,75 @@
 # SECS 日志解析工具（SecsLogViewer）
 
-一个**单文件、离线**的工具（HTML 版 + 打包好的 exe 版）：把 SECS 日志里的“请求/应答”配成一对，再把请求 `<L[]>` 下的键和应答 `<L[]>` 下同位置的值对应起来。
+一个**单文件、离线**的网页工具：构建产物就是**一个 `index.html`**，双击即可用，发给别人也只发这一个文件。
+它把 SECS 日志里的“请求/应答”配成一对，再把请求 `<L[]>` 下的键和应答 `<L[]>` 下同位置的值对应起来。
 默认就是 **S2F13 → S2F14**：请求里的 `<U4[1] 26555 >` 是 ECID，应答里第 i 个 `<F8[1] 1.6 >` 就是它的值；配上 ECID.cfg 后直接显示 `26555 = SDC8_GPPosHom = 1.6`。
 
-## 两个版本
+## 文件夹里每个文件是干什么的
 
-| | 文件 | 说明 |
-| --- | --- | --- |
-| HTML 版 | `index.html` | 直接双击，改完 HTML 立刻生效 |
-| exe 版 | `SecsLogViewer.exe` | HTML 被嵌进 exe（`xxd -i` 转 C 头文件后编译），只发一个 exe 就行，运行时把页面写到 `%TEMP%\secs_log_viewer.html` 再调默认浏览器打开 |
+**源码（只在你机器上，别发给别人）**
 
-和 `tools\` 下 `FanCfgTool.exe` 的做法完全一样（`launcher.cpp` + `fan_cfg_html.h` + `build.bat`），只是换成了本工具。
-注意这只是**把页面藏进 exe**（打包/轻量混淆），不是真正的加密：任何人在运行时都能从 `%TEMP%` 或从 exe 里把 HTML 抠出来。
+| 文件 / 目录 | 说明 |
+| --- | --- |
+| `index.html` | Vite 的入口模板，**287 字节**，只有 `<div id="app">` + 一行 script（不是旧版那个单文件页面） |
+| `src/` | Vue 源码：`core/`（解析逻辑）、`stores/`（状态）、`components/`（界面）、`styles.css` |
+| `package.json` / `package-lock.json` | 依赖清单与版本锁定（重建时保持一致） |
+| `vite.config.mjs` | 构建配置：打成单文件 + 普通脚本（去掉 `type="module"`） |
+| `node_modules/` | 依赖（51 MB），**不用发给别人**；删了也能用 `npm install` 重新装 |
+
+**构建与发布**
+
+| 文件 | 说明 |
+| --- | --- |
+| `npm run build` | 唯一的构建命令：Vue 源码 → `dist\`（就两个文件，见下） |
+| `npm run dev` | 开发模式：热更新，改 `.vue` 立刻看到效果 |
+| `public/USAGE.txt` | 使用说明（GBK，记事本不乱码）；`npm run build` 会自动复制进 `dist\` |
+| `dev/` | 自测脚本，`npm test` 一键跑 |
+
+**产物（可以给别人的）**
+
+| 文件 | 说明 |
+| --- | --- |
+| `dist\index.html` | **工具本体**，约 151 KB，JS/CSS 全内联，双击即用 |
+| `dist\USAGE.txt` | 使用说明（从 `public\` 复制过来） |
+| `dist\` | **整个文件夹就是交付物**：压缩一下发给别人，或只发那个 `index.html` 也行 |
+
+**- 已删除的东西**：旧的 `SecsLogViewer.zip`、`build\`（obj 等中间文件）、`legacy\`（旧版单文件 HTML 与旧测试）、上层 `tools\index.html`（旧版副本），以及 exe 打包那条线（`launcher.cpp`、`build.bat`、`make_header.bat`、`make_exe.bat`、`make_release.bat`、`secs_log_html.h`、`SecsLogViewer.exe`）。
+旧版的祖先版本仍在 git 里，需要时可以用 `git show HEAD:index.html > old.html` 取回。
+exe 那条线也在 git 里，真要恢复：`git checkout HEAD -- launcher.cpp build.bat make_header.bat secs_log_html.h SecsLogViewer.exe`。
+
+## 工程结构（Vue 3 + Vite，分模块写）
+
+界面用 Vue 3 重写、按职责拆成小文件；解析核心不动（还是那份被测试覆盖的纯逻辑）。
+
+| 位置 | 作用 |
+| --- | --- |
+| `src/core/secs-core.js` | **解析核心**：消息头/项解析、名称表、键值配对、时间序列、降采样（纯逻辑，不碰 DOM） |
+| `src/core/secs-dict.js` | SECS 消息含义表（97 条）与自定义消息表的解析/导出 |
+| `src/core/file-reader.js` | 读日志文件：分块流式读、UTF-8/GBK 自动识别、老环境兜底 |
+| `src/core/drop-files.js` | 拖放（含整个文件夹）展开成 File 列表 |
+| `src/core/exporters.js` | CSV/TSV/下载/复制 |
+| `src/stores/app.js` | 全局状态与动作：导入、名称表分流、解析、筛选、导出 |
+| `src/stores/trend.js` | 趋势图数据层：候选变量、时间序列、降采样、统计 |
+| `src/components/cards/*` | 左侧五张设置卡片（日志文件 / 名称表 / 消息表 / 配对设置 / 筛选） |
+| `src/components/views/*` | 右侧五个结果页（明细 / 横向对比 / 原文 / 消息含义 / 趋势图） |
+| `src/components/ui/*` | 通用小件（拖放区） |
+| `dist/index.html` | **构建产物**：单文件、JS/CSS 全内联、普通脚本（`npm run build` 生成） |
+| `legacy/` | 旧版单文件 HTML 与旧的测试脚本（留作对照，正常不用） |
+
+### 关于 Node.js
+
+- **只有构建这台机器需要 Node/npm**：它负责把 Vue 源码编译成 `dist/index.html`。
+- **别人拿到成品不需要 Node**：发 `dist\` 里的 `index.html` 这一个文件即可，双击就能用，离线可用、不装任何东西、不联网。
+- 只有别人要**改源码重新构建**时，才需要 Node + `npm install`。
 
 ## 怎么用
 
 1. 双击 `index.html`（Chrome / Edge 打开，不需要装任何东西，也不需要服务器）。
 2. 把日志文件（`2026-09-17.txt`）或整个日期文件夹拖进左边第 1 栏；
    路径参考：`C:\Users\17140\Desktop\sesloftool\2026917_SW_LOG\Fa\Fa\LogSecslog\2026-09-17\`
-3. （可选）把 `ECID.cfg` 拖进第 2 栏，路径参考：`E:\S25159\CTC\Module_GEM\Cfg\ECID.cfg`。
+3. （可选，但强烈建议）把 **名称表**拖进第 2 栏，可以两张一起拖：
+   - `ECID.cfg`（设备常数）参考路径：`E:\S25159\CTC\Module_GEM\Cfg\ECID.cfg`
+   - `SVID.cfg`（状态变量）参考路径：`C:\Users\17140\Desktop\sesloftool\SVID.cfg`
 4. 第 3 栏选请求/应答码（默认 S2F13 / S2F14），点“开始解析”。
    要看第 N 对：直接在右上角“跳到第 N 对”填数字按回车/点“对”，不在当前范围它会自动从那一对重新解析；
    也可以在第 3 栏自己填“从第 N 对开始、载入 M 对”。想看全部就把 M 填大（如 30000）。
@@ -28,7 +79,40 @@
    - **原文**：当前这一对 S2F13 / S2F14 的原始文本。
    - **消息含义**：日志里出现的每个 SxFy 是干啥的、官方英文名、标准方向、消息体，带出现次数；没出现过的常见消息也能搜。
      详情页顶部还会直接写出当前这一对的含义（如 `S2F13 设备常数请求 → S2F14 设备常数数据`）。
+   - **趋势图**：把 SVID 这类高频量画成折线（见下）。
    - 复制当前视图、导出 CSV（带 BOM，Excel 直接打开不乱码）/ JSON。
+
+## 名称表要按消息分开查（重要）
+
+不同流（Stream）下面的键，含义表和配置文件都不一样：
+
+| 消息 | 键是什么 | 去哪张表查 |
+| --- | --- | --- |
+| S1F3 / S1F4（S1F11 等 S1 流的状态类） | **SVID**（状态变量） | `SVID.cfg` |
+| S2F13 / S2F14（S2F15、S2F29 等 S2 流的常数类） | **ECID**（设备常数） | `ECID.cfg` |
+
+- 工具内置这条默认规则：**S1 流 → SVID 表，S2 流 → ECID 表**；两张表都导入后会自动各查各的。
+- 只导入了一张表时，它就是兜底表（所有消息都用它），所以老习惯也不会坏。
+- 想改：第 2 栏最下面“当前请求码 … 用”下拉，可以把这个消息码改成任意一张表，或者“不使用名称表”。
+- 明细表里有 **名称来源** 列，一眼能看出这一行的名字是从 SVID 还是 ECID 表来的；表头信息栏也会写“S1F3 → SVID”。
+- 实测（2026-09-17.txt）：S1F3 的键用 `SVID.cfg` 查 **74/74 全部有名称**，用 `ECID.cfg` 只能查到 24 个 —— 所以这一步分流是必须的。
+
+## 趋势图（SVID 这种大数据量怎么看）
+
+选中“趋势图”页 → 左边搜/点变量（最多 8 条）→ 右边就是折线图。做过的优化：
+
+| 手段 | 说明 |
+| --- | --- |
+| **min/max 分桶降采样** | 点数超过画布宽度时，每个像素列只画该列的最低/最高点，几万点也不卡，**尖峰不会被画没**（实测 1425 点 → 784 点，最大值仍一致） |
+| 各自归一化 | 量纲不同的量（温度 110℃、步号 0~12）勾上“各自归一化”可以同图比趋势 |
+| 拖拽缩放 / 双击重置 | 在图上横向拖 = 放大到那段时间；双击或“重置缩放”回到全程 |
+| 十字线取值 | 鼠标移动显示该时刻各条线最近的值，方便对齐看 |
+| 统计表 | 每条线的样本数 / 最小 / 最大 / 平均 / 最新值 |
+| 导出 | 数据导出 CSV（长表：时间,变量,名称,单位,值），或直接导出 PNG 图片 |
+
+其它可选做法（按需要再加）：把离散热状态的 SVID 画成“色带/状态条”，在明细表每行加一根迷你 sparkline，或者只画可见区间（惰性取样）以进一步提速。
+
+实测这份日志（S1F3/S1F4，25759 对）：全天出现过 **870 个不同 SVID**，`SVID.cfg` 里 **870/870 都有名称**；各变量采样次数不一样（比如 `47521` 采了 22383 次，`48341` 1425 次，`51001` 419 次），因为主机在不同时段轮询的 SVID 清单不同——图是按每个点自己的时间画的，所以这种不均匀采样也不会画错。
 
 ## SECS 消息含义表
 
@@ -60,39 +144,56 @@
 ## 自测
 
 ```bat
-cd tools\SecsLogViewer\dev
-node test-core.mjs        :: 抽取 index.html 里的核心解析代码，跑真实日志 + ECID.cfg（含异常场景）
-node test-ui.mjs          :: 用 DOM 桩把整页脚本跑起来，点“载入示例数据”验证界面
-node test-exe.mjs         :: 校验 secs_log_html.h / SecsLogViewer.exe 里嵌的 HTML 和 index.html 逐字节一致
-node analyze.mjs          :: 只是想看看某个日志的结构统计时用
+cd /d E:\s26042\tools\SecsLogViewer
+npm run test:core   :: 解析核心：直接 import src/core/*，跑真实日志 + 真实 ECID.cfg/SVID.cfg（12 组断言）
+npm run test:app    :: 用 jsdom 加载构建产物 dist/index.html，走示例数据 + 真日志端到端
+npm run test:standalone :: 把 index.html 拷到工程外面单独运行，证明“只给一个文件就能用”
+npm test            :: 三个一起跑
 ```
 
-`index.html` 里 `/* CORE BEGIN */ … /* CORE END */` 之间是纯解析逻辑，测试直接抽这段代码，所以测的就是真正发布的那份实现。
+`test-app.mjs` 是"真的把构建产物跑起来"的测试（jsdom 执行内联脚本、点按钮、读表格），所以界面改动不会悄悄跑偏。
 
-## 重新打包 exe（两步）
+## 开发与打包
 
-改完 `index.html` 后：
+### 三步走：编辑 → 构建 → 给别人
 
-**第 1 步 —— 生成 C 头文件**（Git Bash，或直接双击 `make_header.bat`）
-
-```bash
-cd /e/s26042/tools/SecsLogViewer
-xxd -i -n secs_log_html index.html > secs_log_html.h
-```
-
-`-n secs_log_html` 是为了让变量名固定成 `secs_log_html` / `secs_log_html_len`，和 `launcher.cpp` 里写死的名字对上（不用 `-n` 的话 xxd 会按文件名生成 `index_html`）。
-
-**第 2 步 —— 编译**（VS Developer Command Prompt，或直接双击 `build.bat`）
+**第 1 步：装环境（只做一次）**
 
 ```bat
 cd /d E:\s26042\tools\SecsLogViewer
-build.bat
+npm install
 ```
 
-等价于：
+**第 2 步：改代码 / 预览（可选）**
 
 ```bat
-cl /nologo /O2 /MT launcher.cpp /Fo:build\ /link user32.lib shell32.lib /OUT:SecsLogViewer.exe
+npm run dev           :: 浏览器打开 http://localhost:5173，改 src 里的 .vue 立刻生效，不用反复 build
 ```
 
-完事，`SecsLogViewer.exe` 就是新版（约 156 KB，里面嵌着那份 54 KB 的 HTML）。
+**第 3 步：构建 + 交给别人**
+
+```bat
+npm run build         :: 产出 dist\index.html（约 151 KB）+ dist\USAGE.txt
+```
+
+然后把 **`dist\` 整个文件夹**（或只把 `index.html`）发给别人。对方那边：
+
+1. 双击 `index.html`（用 Chrome 或 Edge）→ 拖日志进去就用。
+   - **不需要 Node.js、不需要 npm、不需要装任何东西、不需要联网、不需要服务器。**
+   - 如果双击是用 IE 打开的：右键 →“打开方式” → Chrome / Edge。
+2. `USAGE.txt` 是给对方看的使用说明。
+
+想做成"一个压缩包发过去"：右键 `dist` 文件夹 → 发送到 → 压缩(zipped)文件夹。
+
+如果哪天想“放公司内网当网页用”：把 `dist\index.html` 丢进任意 Web 服务器目录（IIS 的 `wwwroot`、nginx 的 `html`）即可访问，纯静态、不需要后端。
+
+### 关于“不给源码”这件事
+
+- `npm run build` 的产物里**没有 `.vue` 源文件、没有 `src/`、没有 `package.json`**，只有编译+压缩后的 JS —— 比直接给源码强得多。
+- 但它**不等于加密**：把 `index.html` 里的 JS 格式化之后，逻辑和中文文案仍然能读出来（只是看不到组件结构和注释）。
+- 想再提高门槛，可以加一步代码混淆（`javascript-obfuscator`）：变量名会被打乱、字符串会被编码，读起来成本高很多，代价是体积变大、出问题更难排查。需要的话告诉我，我给你接进 `npm run build`。
+
+构建时踩过的两个坑（都已在代码里处理，改配置时别踩回去）：
+
+1. **产物不能是 ES module**：页面是用 `file://` 双击打开的，`<script type="module">` 会被浏览器按 CORS 拦掉；所以 `vite.config.mjs` 里打成 IIFE，并在构建后把 `type="module"` 去掉。
+2. **挂载要等 DOM 就绪**：单文件产物里内联脚本可能排在 `<div id="app">` 之前，`src/main.js` 里因此等 `DOMContentLoaded` 再 mount。

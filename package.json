@@ -1,0 +1,25 @@
+{
+  "name": "secs-log-viewer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SECS/GEM 日志解析工具（Vue 3 + Vite，构建产物是单个 HTML，再打进 exe）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:core": "node dev/test-core.mjs",
+    "test:app": "node dev/test-app.mjs",
+    "test:standalone": "node dev/test-standalone.mjs",
+    "test": "npm run test:core && npm run test:app && npm run test:standalone"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "jsdom": "^25.0.1",
+    "vite": "^6.0.7",
+    "vite-plugin-singlefile": "^2.1.0"
+  }
+}
